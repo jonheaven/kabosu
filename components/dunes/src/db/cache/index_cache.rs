@@ -452,7 +452,7 @@ impl IndexCache {
     /// Take ledger entries returned by the `TransactionCache` and add them to the `DbCache`. Update global balances and counters
     /// as well.
     fn add_ledger_entries_to_db_cache(&mut self, entries: &[DbLedgerEntry]) {
-        self.db_cache.ledger_entries.extend(entries.clone());
+        self.db_cache.ledger_entries.extend(entries.iter().cloned());
         for entry in entries.iter() {
             match entry.operation {
                 DbLedgerOperation::Etching => {

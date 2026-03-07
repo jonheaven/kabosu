@@ -245,6 +245,8 @@ pub async fn index_block(
         }
 
         let inserted_lotto_tickets = if !lotto_mints.is_empty() {
+            // Ticket insertion re-validates the mint against the stored deploy and
+            // checks the prize-pool payment on this same transaction's outputs.
             match doginals_pg::insert_lotto_tickets(
                 &lotto_mints,
                 block_height,

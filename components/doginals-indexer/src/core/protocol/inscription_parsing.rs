@@ -4,7 +4,7 @@ use bitcoin::{hash_types::Txid, ScriptBuf, Transaction, TxIn as BitcoinTxIn, Wit
 use dogecoin::{
     try_debug, try_warn,
     types::{
-        DogecoinBlockData, DogecoinNetwork, DogecoinTransactionData, BlockIdentifier, TxOut,
+        dogecoin::TxOut, BlockIdentifier, DogecoinBlockData, DogecoinNetwork, DogecoinTransactionData,
         OrdinalInscriptionCurseType, OrdinalInscriptionNumber, OrdinalInscriptionRevealData,
         OrdinalOperation,
     },
@@ -335,6 +335,8 @@ pub fn parse_inscriptions_from_standardized_tx(
                     lotto_mints.push(ParsedLottoMint {
                         inscription_id: reveal_data.inscription_id.clone(),
                         tx_id: tx.transaction_identifier.get_hash_bytes_str().to_string(),
+                        // Persist all tx outputs so the DB layer can verify the exact
+                        // prize-pool payment occurred in this same inscription tx.
                         outputs: tx
                             .metadata
                             .outputs

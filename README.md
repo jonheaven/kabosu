@@ -27,6 +27,11 @@ Both projects are completely independent codebases. doghook does not import dog.
 | Dunes | Full | `doghook dunes service start` |
 | DNS (Dogecoin Name System) | Full — 28 namespaces, first-wins, reorg-safe | `doghook dns resolve`, `doghook dns list` |
 | Dogemap (block claims) | Full — first-wins, reorg-safe | `doghook dogemap status`, `doghook dogemap list` |
+| doge-lotto | Full — deploys, atomic ticket mints, auto-resolution | `doghook lotto deploy`, `doghook lotto mint`, `doghook lotto list`, `doghook lotto status` |
+
+### doge-lotto
+
+`doghook lotto mint` now broadcasts one atomic transaction that both pays the deploy's `prize_pool_address` the exact `ticket_price_koinu` amount and inscribes the `doge-lotto` ticket JSON in the same tx, so the indexer can verify payment trustlessly.
 
 ### DNS — Dogecoin Name System
 

@@ -10,6 +10,14 @@ use std::{
 };
 
 use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
+use dogecoin::bitcoincore_rpc::{
+    bitcoin::{
+        self, absolute::LockTime, hashes::Hash, Amount, OutPoint, ScriptBuf, Sequence, Transaction,
+        TxIn, TxOut, Txid,
+    },
+    json::SignRawTransactionInput,
+    RpcApi,
+};
 use clap::Parser;
 use commands::{
     Command, ConfigCommand, DatabaseCommand, DnsCommand, DogemapCommand, IndexCommand,
@@ -19,6 +27,8 @@ use config::{generator::generate_toml_config, Config};
 use hiro_system_kit;
 
 mod commands;
+
+const DEFAULT_LOTTO_FEE_RATE: f64 = 1.0;
 
 pub fn main() {
     let logger = hiro_system_kit::log::setup_logger();
@@ -334,9 +344,18 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 };
 
                 let seed_numbers = if let Some(seed_numbers) = &cmd.seed_numbers {
-                    parse_seed_numbers(seed_numbers)?
+                    parse_seed_numbers_for_lotto(
+                        seed_numbers,
+                        status.summary.main_numbers_pick,
+                        status.summary.main_numbers_max,
+                    )?
                 } else {
-                    doginals_indexer::core::meta_protocols::lotto::quickpick()
+                    doginals_indexer::core::meta_protocols::lotto::quickpick_for_config(
+                        &doginals_indexer::core::meta_protocols::lotto::NumberConfig {
+                            pick: status.summary.main_numbers_pick,
+                            max: status.summary.main_numbers_max,
+                        },
+                    )
                 };
                 let ticket_id = cmd
                     .ticket_id
@@ -351,26 +370,40 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     "seed_numbers": seed_numbers,
                 });
                 let payload = compact_json_without_nulls(payload)?;
+                let result = broadcast_atomic_lotto_mint(
+                    &config,
+                    &status.summary.prize_pool_address,
+                    status.summary.ticket_price_koinu,
+                    &payload,
+                    ctx,
+                )?;
 
                 if cmd.json {
                     println!(
                         "{}",
                         serde_json::json!({
-                            "content_type": "text/plain",
+                            "txid": result.txid.to_string(),
+                            "inscription_id": format!("{}i0", result.txid),
+                            "lotto_id": cmd.lotto_id,
+                            "ticket_id": ticket_id,
+                            "seed_numbers": seed_numbers,
                             "payload": payload,
                             "payment": {
                                 "address": status.summary.prize_pool_address,
                                 "amount_koinu": status.summary.ticket_price_koinu,
-                            }
+                            },
+                            "fee_koinu": result.fee_koinu,
+                            "change_koinu": result.change_koinu,
                         })
                     );
                 } else {
-                    println!("{}", payload);
-                    eprintln!(
-                        "pay exact {} koinu to {} in the same transaction",
-                        status.summary.ticket_price_koinu,
-                        status.summary.prize_pool_address,
-                    );
+                    println!("Broadcast txid:         {}", result.txid);
+                    println!("Inscription ID:         {}i0", result.txid);
+                    println!("Ticket ID:              {}", ticket_id);
+                    println!("Payment Address:        {}", status.summary.prize_pool_address);
+                    println!("Ticket Price (koinu):   {}", status.summary.ticket_price_koinu);
+                    println!("Fee (koinu):            {}", result.fee_koinu);
+                    println!("Change (koinu):         {}", result.change_koinu);
                 }
             }
             LottoCommand::Status(cmd) => {
@@ -573,8 +606,12 @@ fn prune_nulls(value: &mut serde_json::Value) {
     }
 }
 
-fn parse_seed_numbers(value: &str) -> Result<Vec<u16>, String> {
-    let parsed: Vec<u16> = value
+fn parse_seed_numbers_for_lotto(
+    value: &str,
+    expected_pick: u16,
+    max_number: u16,
+) -> Result<Vec<u16>, String> {
+    let mut parsed: Vec<u16> = value
         .split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
@@ -584,18 +621,27 @@ fn parse_seed_numbers(value: &str) -> Result<Vec<u16>, String> {
         })
         .collect::<Result<_, _>>()?;
 
-    let payload = serde_json::json!({
-        "p": "doge-lotto",
-        "op": "mint",
-        "lotto_id": "validation-only",
-        "ticket_id": "validation-only",
-        "seed_numbers": parsed,
-    });
-    doginals_indexer::core::meta_protocols::lotto::try_parse_lotto_mint(
-        compact_json_without_nulls(payload)?.as_bytes(),
-    )
-    .map(|mint| mint.seed_numbers)
-    .ok_or("seed_numbers must contain exactly 69 unique values in [1, 420]".into())
+    if parsed.len() != expected_pick as usize {
+        return Err(format!(
+            "seed_numbers must contain exactly {} unique values in [1, {}]",
+            expected_pick, max_number
+        ));
+    }
+
+    parsed.sort_unstable();
+    parsed.dedup();
+    if parsed.len() != expected_pick as usize
+        || parsed
+            .iter()
+            .any(|number| !(1..=max_number).contains(number))
+    {
+        return Err(format!(
+            "seed_numbers must contain exactly {} unique values in [1, {}]",
+            expected_pick, max_number
+        ));
+    }
+
+    Ok(parsed)
 }
 
 fn generate_ticket_id() -> String {
@@ -603,4 +649,301 @@ fn generate_ticket_id() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     format!("ticket-{}-{}", now.as_secs(), now.subsec_nanos())
+}
+
+struct AtomicLottoMintResult {
+    txid: Txid,
+    fee_koinu: u64,
+    change_koinu: u64,
+}
+
+fn broadcast_atomic_lotto_mint(
+    config: &Config,
+    prize_pool_address: &str,
+    ticket_price_koinu: u64,
+    payload: &str,
+    ctx: &Context,
+) -> Result<AtomicLottoMintResult, String> {
+    let client = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, ctx);
+    let script_segments = build_lotto_inscription_segments(payload.as_bytes());
+    let output_count = if ticket_price_koinu > 0 { 2 } else { 1 };
+    let fee_koinu = calc_lotto_fee(script_sig_size(&script_segments), output_count, DEFAULT_LOTTO_FEE_RATE);
+    let required_koinu = ticket_price_koinu.saturating_add(fee_koinu);
+    let (funding_txid, funding_vout, funding_value, funding_script) =
+        select_lotto_utxo(&client, required_koinu, ticket_price_koinu == 0)?;
+
+    let funding_koinu = funding_value.to_sat();
+    let change_koinu = funding_koinu.saturating_sub(required_koinu);
+    if ticket_price_koinu == 0 && change_koinu == 0 {
+        return Err(
+            "free lotto mint requires a wallet UTXO larger than the estimated fee so the transaction can keep one standard output".into(),
+        );
+    }
+
+    let mut outputs = Vec::new();
+    if ticket_price_koinu > 0 {
+        outputs.push(TxOut {
+            value: Amount::from_sat(ticket_price_koinu),
+            script_pubkey: parse_dogecoin_address(prize_pool_address)?,
+        });
+    }
+    if change_koinu > 0 || ticket_price_koinu == 0 {
+        let change_address: String = client
+            .call("getrawchangeaddress", &[])
+            .map_err(|e| format!("unable to get raw change address: {e}"))?;
+        let change_value = if ticket_price_koinu == 0 {
+            funding_koinu.saturating_sub(fee_koinu)
+        } else {
+            change_koinu
+        };
+        outputs.push(TxOut {
+            value: Amount::from_sat(change_value),
+            script_pubkey: parse_dogecoin_address(&change_address)?,
+        });
+    }
+
+    let template = Transaction {
+        version: bitcoin::transaction::Version(1),
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: funding_txid,
+                vout: funding_vout,
+            },
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: bitcoin::Witness::new(),
+        }],
+        output: outputs.clone(),
+    };
+
+    let (sig_bytes, pubkey_bytes) = sign_lotto_template(
+        &client,
+        &template,
+        funding_txid,
+        funding_vout,
+        &funding_script,
+        funding_value,
+    )?;
+
+    let final_tx = Transaction {
+        version: bitcoin::transaction::Version(1),
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: funding_txid,
+                vout: funding_vout,
+            },
+            script_sig: ScriptBuf::from(build_script_sig(
+                &script_segments,
+                &sig_bytes,
+                &pubkey_bytes,
+            )),
+            sequence: Sequence::MAX,
+            witness: bitcoin::Witness::new(),
+        }],
+        output: outputs,
+    };
+
+    let txid = client
+        .send_raw_transaction(&final_tx)
+        .map_err(|e| format!("unable to broadcast atomic lotto mint transaction: {e}"))?;
+
+    Ok(AtomicLottoMintResult {
+        txid,
+        fee_koinu,
+        change_koinu: if ticket_price_koinu == 0 {
+            funding_koinu.saturating_sub(fee_koinu)
+        } else {
+            change_koinu
+        },
+    })
+}
+
+fn build_lotto_inscription_segments(payload: &[u8]) -> Vec<Vec<u8>> {
+    vec![
+        encode_push(b"ord"),
+        encode_push(&1_u16.to_le_bytes()),
+        encode_push(b"text/plain"),
+        encode_count(0),
+        encode_push(payload),
+    ]
+}
+
+fn encode_push(data: &[u8]) -> Vec<u8> {
+    let len = data.len();
+    let mut out = Vec::with_capacity(len + 3);
+    if len == 0 {
+        out.push(0x00);
+    } else if len <= 75 {
+        out.push(len as u8);
+        out.extend_from_slice(data);
+    } else if len <= 255 {
+        out.push(0x4c);
+        out.push(len as u8);
+        out.extend_from_slice(data);
+    } else {
+        out.push(0x4d);
+        out.push((len & 0xff) as u8);
+        out.push((len >> 8) as u8);
+        out.extend_from_slice(data);
+    }
+    out
+}
+
+fn encode_push_size(data_len: usize) -> usize {
+    if data_len == 0 {
+        1
+    } else if data_len <= 75 {
+        1 + data_len
+    } else if data_len <= 255 {
+        2 + data_len
+    } else {
+        3 + data_len
+    }
+}
+
+fn encode_count(n: u16) -> Vec<u8> {
+    match n {
+        0 => vec![0x00],
+        1..=16 => vec![0x50 + n as u8],
+        17..=127 => vec![0x01, n as u8],
+        _ => vec![0x02, (n & 0xff) as u8, (n >> 8) as u8],
+    }
+}
+
+fn build_script_sig(segments: &[Vec<u8>], sig: &[u8], pubkey: &[u8]) -> Vec<u8> {
+    let total = segments.iter().map(|segment| segment.len()).sum::<usize>()
+        + encode_push_size(sig.len())
+        + encode_push_size(pubkey.len());
+    let mut out = Vec::with_capacity(total);
+    for segment in segments {
+        out.extend_from_slice(segment);
+    }
+    out.extend(encode_push(sig));
+    out.extend(encode_push(pubkey));
+    out
+}
+
+fn script_sig_size(segments: &[Vec<u8>]) -> usize {
+    let segments_size: usize = segments.iter().map(|segment| segment.len()).sum();
+    segments_size + 75 + 34
+}
+
+fn calc_lotto_fee(script_sig_bytes: usize, n_outputs: usize, fee_rate: f64) -> u64 {
+    let script_varint = if script_sig_bytes < 0xfd { 1usize } else { 3 };
+    let input_size = 32 + 4 + script_varint + script_sig_bytes + 4;
+    let output_size = n_outputs * (8 + 1 + 25);
+    let total_size = 10 + input_size + output_size;
+    (total_size as f64 * fee_rate).ceil() as u64
+}
+
+fn select_lotto_utxo(
+    client: &dogecoin::bitcoincore_rpc::Client,
+    required_koinu: u64,
+    require_strictly_more: bool,
+) -> Result<(Txid, u32, Amount, ScriptBuf), String> {
+    let utxos = client
+        .list_unspent(Some(1), None, None, None, None)
+        .map_err(|e| format!("unable to list wallet UTXOs: {e}"))?;
+
+    utxos
+        .into_iter()
+        .filter(|utxo| {
+            utxo.spendable
+                && if require_strictly_more {
+                    utxo.amount.to_sat() > required_koinu
+                } else {
+                    utxo.amount.to_sat() >= required_koinu
+                }
+        })
+        .max_by_key(|utxo| utxo.amount)
+        .map(|utxo| (utxo.txid, utxo.vout, utxo.amount, utxo.script_pub_key))
+        .ok_or_else(|| {
+            format!(
+                "no spendable wallet UTXO covers {} koinu required for the atomic lotto mint",
+                required_koinu
+            )
+        })
+}
+
+fn sign_lotto_template(
+    client: &dogecoin::bitcoincore_rpc::Client,
+    tx: &Transaction,
+    input_txid: Txid,
+    input_vout: u32,
+    input_script: &ScriptBuf,
+    input_value: Amount,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let result = client
+        .sign_raw_transaction_with_wallet(
+            tx,
+            Some(&[SignRawTransactionInput {
+                txid: input_txid,
+                vout: input_vout,
+                script_pub_key: input_script.clone(),
+                redeem_script: None,
+                amount: Some(input_value),
+            }]),
+            None,
+        )
+        .map_err(|e| format!("wallet failed to sign lotto mint template: {e}"))?;
+
+    if !result.complete {
+        return Err(format!(
+            "wallet could not fully sign the lotto mint transaction: {:?}",
+            result.errors
+        ));
+    }
+
+    let signed_tx: Transaction = bitcoin::consensus::deserialize(&result.hex)
+        .map_err(|e| format!("unable to decode signed transaction: {e}"))?;
+    let script_sig = &signed_tx.input[0].script_sig;
+    let mut instructions = script_sig.instructions();
+
+    let sig = match instructions.next() {
+        Some(Ok(bitcoin::script::Instruction::PushBytes(push_bytes))) => push_bytes.as_bytes().to_vec(),
+        other => {
+            return Err(format!(
+                "unexpected signature instruction in signed lotto mint input: {:?}",
+                other
+            ))
+        }
+    };
+
+    let pubkey = match instructions.next() {
+        Some(Ok(bitcoin::script::Instruction::PushBytes(push_bytes))) => push_bytes.as_bytes().to_vec(),
+        other => {
+            return Err(format!(
+                "unexpected pubkey instruction in signed lotto mint input: {:?}",
+                other
+            ))
+        }
+    };
+
+    Ok((sig, pubkey))
+}
+
+fn parse_dogecoin_address(addr: &str) -> Result<ScriptBuf, String> {
+    let decoded = bitcoin::base58::decode_check(addr)
+        .map_err(|e| format!("invalid Dogecoin address '{}': {}", addr, e))?;
+    if decoded.is_empty() {
+        return Err(format!("invalid Dogecoin address '{}': empty payload", addr));
+    }
+
+    let version = decoded[0];
+    let payload = &decoded[1..];
+    match version {
+        0x1e => {
+            let hash = bitcoin::PubkeyHash::from_slice(payload)
+                .map_err(|e| format!("invalid P2PKH address '{}': {}", addr, e))?;
+            Ok(ScriptBuf::new_p2pkh(&hash))
+        }
+        0x16 => {
+            let hash = bitcoin::ScriptHash::from_slice(payload)
+                .map_err(|e| format!("invalid P2SH address '{}': {}", addr, e))?;
+            Ok(ScriptBuf::new_p2sh(&hash))
+        }
+        _ => Err(format!("unsupported Dogecoin address version '{}' for '{}'", version, addr)),
+    }
 }

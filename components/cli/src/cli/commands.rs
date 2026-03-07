@@ -110,7 +110,7 @@ pub enum LottoCommand {
     /// Build a compact doge-lotto deploy inscription JSON payload
     #[clap(name = "deploy")]
     Deploy(LottoDeployCommand),
-    /// Build a compact doge-lotto mint inscription JSON payload
+    /// Build, sign, and broadcast an atomic doge-lotto mint transaction
     #[clap(name = "mint")]
     Mint(LottoMintCommand),
     /// Show deployment and winner status for a lotto_id
@@ -168,7 +168,7 @@ pub struct LottoMintCommand {
     pub seed_numbers: Option<String>,
     #[clap(long = "config-path")]
     pub config_path: String,
-    /// Output as JSON wrapper instead of raw inscription payload
+    /// Output the broadcast result as JSON
     #[clap(long)]
     pub json: bool,
 }

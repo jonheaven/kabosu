@@ -6,7 +6,7 @@ use rand::{rng, Rng};
 use rocksdb::{DBPinnableSlice, Options, DB};
 
 fn get_default_blocks_db_path(base_dir: &std::path::Path) -> PathBuf {
-    let mut destination_path = base_dir.clone();
+    let mut destination_path = base_dir.to_path_buf();
     destination_path.push("hord.rocksdb");
     destination_path
 }

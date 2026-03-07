@@ -166,8 +166,10 @@ impl Brc20MemoryCache {
         if !cache_missed_ordinal_numbers.is_empty() {
             // Some ordinal numbers were not in cache, check DB.
             self.handle_cache_miss(client).await?;
+            let missed_ordinal_numbers: Vec<u64> =
+                cache_missed_ordinal_numbers.iter().cloned().collect();
             let pending_transfers = drc20_pg::get_unsent_token_transfers(
-                &cache_missed_ordinal_numbers.iter().cloned().collect(),
+                &missed_ordinal_numbers,
                 client,
             )
             .await?;

@@ -303,8 +303,11 @@ impl RawEnvelope {
                 continue;
             };
 
-            // Everything after "ord" is the payload (tag-value pairs + body).
-            let payload: Vec<Vec<u8>> = pushes[ord_pos + 1..].to_vec();
+            // Support both:
+            // 1. standard ord tag/value payloads after "ord"
+            // 2. wallet-built Dogecoin scriptSig payloads:
+            //    ord | piece_count:u16le | mime | chunk_count | chunk | sig | pubkey
+            let payload = dogecoin_payload_from_pushes(&pushes[ord_pos + 1..]);
 
             envelopes.push(Envelope {
                 input: 0,
@@ -317,6 +320,26 @@ impl RawEnvelope {
 
         envelopes
     }
+}
+
+fn dogecoin_payload_from_pushes(pushes_after_ord: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    // Single-piece wallet mints use:
+    //   PUSH("ord") PUSH(1u16le) PUSH("text/plain") PUSH(OP_0) PUSH(body) PUSH(sig) PUSH(pubkey)
+    // Convert that into the standard ord payload:
+    //   PUSH(tag=content_type) PUSH("text/plain") PUSH(body_tag="") PUSH(body)
+    if pushes_after_ord.len() >= 5 && pushes_after_ord[0].len() == 2 {
+        let piece_count = u16::from_le_bytes([pushes_after_ord[0][0], pushes_after_ord[0][1]]);
+        if piece_count == 1 && pushes_after_ord[2].is_empty() {
+            return vec![
+                Tag::ContentType.bytes().to_vec(),
+                pushes_after_ord[1].clone(),
+                BODY_TAG.to_vec(),
+                pushes_after_ord[3].clone(),
+            ];
+        }
+    }
+
+    pushes_after_ord.to_vec()
 }
 
 // #[cfg(test)]

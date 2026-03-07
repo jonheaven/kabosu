@@ -2175,6 +2175,9 @@ fn tx_outputs_match_prize_payment(
     prize_pool_address: &str,
     ticket_price_koinu: u64,
 ) -> bool {
+    // Atomic lotto mints are valid only when this same transaction pays the
+    // deploy's prize pool exactly `ticket_price_koinu`. Free lottos therefore
+    // require an exact zero total to the prize pool output set.
     let paid_total = outputs
         .iter()
         .filter_map(|output| {
