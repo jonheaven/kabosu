@@ -909,27 +909,34 @@ fn broadcast_atomic_lotto_mint(
 ) -> Result<AtomicLottoMintResult, String> {
     let client = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, ctx);
     let script_segments = build_lotto_inscription_segments(payload.as_bytes());
-    let tip_koinu = ticket_price_koinu.saturating_mul(tip_percent as u64) / 100;
+    // extra_amount = ticket_price_koinu * (tip_percent / 100)
+    let extra_amount_koinu = ticket_price_koinu.saturating_mul(tip_percent as u64) / 100;
+    if tip_percent > 0 && extra_amount_koinu == 0 {
+        return Err(
+            "tip_percent is non-zero but computed extra amount is 0 koinu; increase ticket price or reduce rounding loss"
+                .into(),
+        );
+    }
     let output_count = 1
         + usize::from(ticket_price_koinu > 0)
-        + usize::from(tip_koinu > 0);
+        + usize::from(extra_amount_koinu > 0);
     let fee_koinu =
         calc_lotto_fee(script_sig_size(&script_segments), output_count, DEFAULT_LOTTO_FEE_RATE);
     let required_koinu = ticket_price_koinu
-        .saturating_add(tip_koinu)
+        .saturating_add(extra_amount_koinu)
         .saturating_add(fee_koinu);
     let (funding_txid, funding_vout, funding_value, funding_script) =
         select_lotto_utxo(
             &client,
             required_koinu,
-            ticket_price_koinu == 0 && tip_koinu == 0,
+            ticket_price_koinu == 0 && extra_amount_koinu == 0,
         )?;
 
     let funding_koinu = funding_value.to_sat();
     let prize_pool_script = parse_dogecoin_address(prize_pool_address)?;
-    let protocol_dev_script = if tip_koinu > 0 {
+    let protocol_dev_script = if extra_amount_koinu > 0 {
         Some(parse_dogecoin_address(
-            &config.protocols.lotto.protocol_dev_address,
+            config.protocols.lotto.protocol_dev_address.trim(),
         )?)
     } else {
         None
@@ -939,7 +946,7 @@ fn broadcast_atomic_lotto_mint(
         &prize_pool_script,
         protocol_dev_script.as_ref(),
         ticket_price_koinu,
-        tip_koinu,
+        extra_amount_koinu,
         funding_koinu,
         fee_koinu,
     )?;
@@ -983,7 +990,7 @@ fn broadcast_atomic_lotto_mint(
 
     Ok(AtomicLottoMintResult {
         txid,
-        tip_koinu,
+        tip_koinu: extra_amount_koinu,
         fee_koinu,
         change_koinu,
     })
@@ -994,16 +1001,16 @@ fn build_atomic_lotto_outputs(
     prize_pool_script: &ScriptBuf,
     protocol_dev_script: Option<&ScriptBuf>,
     ticket_price_koinu: u64,
-    tip_koinu: u64,
+    extra_amount_koinu: u64,
     funding_koinu: u64,
     fee_koinu: u64,
 ) -> Result<(Vec<TxOut>, u64), String> {
     let required_koinu = ticket_price_koinu
-        .saturating_add(tip_koinu)
+        .saturating_add(extra_amount_koinu)
         .saturating_add(fee_koinu);
     let change_koinu = funding_koinu.saturating_sub(required_koinu);
 
-    if ticket_price_koinu == 0 && tip_koinu == 0 && change_koinu == 0 {
+    if ticket_price_koinu == 0 && extra_amount_koinu == 0 && change_koinu == 0 {
         return Err(
             "free lotto mint requires a wallet UTXO larger than the estimated fee so the transaction can keep one standard output"
                 .into(),
@@ -1020,12 +1027,13 @@ fn build_atomic_lotto_outputs(
         });
     }
 
-    if tip_koinu > 0 {
+    // Optional immutable protocol-dev tip output in the same atomic mint tx.
+    if extra_amount_koinu > 0 {
         let Some(protocol_dev_script) = protocol_dev_script else {
             return Err("protocol dev address is required when tip amount is non-zero".into());
         };
         outputs.push(TxOut {
-            value: Amount::from_sat(tip_koinu),
+            value: Amount::from_sat(extra_amount_koinu),
             script_pubkey: protocol_dev_script.clone(),
         });
     }
