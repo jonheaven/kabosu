@@ -18,6 +18,8 @@ use doginals::{
 };
 use serde_json::json;
 
+use crate::core::meta_protocols::dns::try_parse_dns_name;
+use crate::core::meta_protocols::dogemap::try_parse_dogemap_claim;
 use crate::core::meta_protocols::drc20::{
     drc20_activation_height,
     parser::{parse_drc20_operation, ParsedDrc20Operation},
@@ -117,6 +119,8 @@ pub fn parse_inscriptions_from_standardized_tx(
     block_identifier: &BlockIdentifier,
     network: &DogecoinNetwork,
     drc20_operation_map: &mut HashMap<String, ParsedDrc20Operation>,
+    dns_map: &mut HashMap<String, String>,
+    dogemap_map: &mut HashMap<u32, String>,
     config: &Config,
     ctx: &Context,
 ) -> Vec<OrdinalOperation> {
@@ -264,6 +268,21 @@ pub fn parse_inscriptions_from_standardized_tx(
             }
         }
 
+        // DNS detection — runs before the predicate filter so DNS names are
+        // never accidentally excluded by content-type predicates.
+        if let Some(body) = inscription.body.as_ref() {
+            if let Some(name) = try_parse_dns_name(body) {
+                dns_map.entry(name).or_insert_with(|| reveal_data.inscription_id.clone());
+            }
+        }
+
+        // Dogemap detection — same reasoning as DNS above.
+        if let Some(body) = inscription.body.as_ref() {
+            if let Some(block_number) = try_parse_dogemap_claim(body, block_identifier.index) {
+                dogemap_map.entry(block_number).or_insert_with(|| reveal_data.inscription_id.clone());
+            }
+        }
+
         // Hiro-style predicate filtering: skip inscriptions that don't match the configured rules.
         if let Some(predicates) = config.doginals_predicates() {
             if !crate::core::protocol::predicate::inscription_matches_predicates(&inscription, predicates) {
@@ -281,6 +300,8 @@ pub fn parse_inscriptions_from_standardized_tx(
 pub fn parse_inscriptions_in_standardized_block(
     block: &mut DogecoinBlockData,
     drc20_operation_map: &mut HashMap<String, ParsedDrc20Operation>,
+    dns_map: &mut HashMap<String, String>,
+    dogemap_map: &mut HashMap<u32, String>,
     config: &Config,
     ctx: &Context,
 ) {
@@ -290,6 +311,8 @@ pub fn parse_inscriptions_in_standardized_block(
             &block.block_identifier,
             &block.metadata.network,
             drc20_operation_map,
+            dns_map,
+            dogemap_map,
             config,
             ctx,
         );
@@ -325,7 +348,7 @@ mod test {
                     .build(),
             )
             .build();
-        parse_inscriptions_in_standardized_block(&mut block, &mut HashMap::new(), &config, &ctx);
+        parse_inscriptions_in_standardized_block(&mut block, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), &config, &ctx);
         let OrdinalOperation::InscriptionRevealed(reveal) =
             &block.transactions[0].metadata.ordinal_operations[0]
         else {

@@ -1087,6 +1087,95 @@ pub async fn rollback_block<T: GenericClient>(block_height: u64, client: &T) -> 
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// DNS — Dogecoin Name System
+// ---------------------------------------------------------------------------
+
+/// Insert DNS name registrations discovered in a block.
+///
+/// `dns_map`: name → inscription_id (first wins within a block).
+/// Across blocks, `ON CONFLICT DO NOTHING` enforces first-wins semantics.
+pub async fn insert_dns_names<T: GenericClient>(
+    dns_map: &HashMap<String, String>,
+    block_height: u64,
+    block_timestamp: u32,
+    client: &T,
+) -> Result<(), String> {
+    for (name, inscription_id) in dns_map {
+        client
+            .execute(
+                "INSERT INTO dns_names (name, inscription_id, block_height, block_timestamp)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (name) DO NOTHING",
+                &[name, inscription_id, &(block_height as i64), &(block_timestamp as i64)],
+            )
+            .await
+            .map_err(|e| format!("insert_dns_names: {e}"))?;
+    }
+    Ok(())
+}
+
+pub async fn rollback_dns_names<T: GenericClient>(
+    block_height: u64,
+    client: &T,
+) -> Result<(), String> {
+    client
+        .execute(
+            "DELETE FROM dns_names WHERE block_height = $1",
+            &[&(block_height as i64)],
+        )
+        .await
+        .map_err(|e| format!("rollback_dns_names: {e}"))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Dogemap — block claim indexing
+// ---------------------------------------------------------------------------
+
+/// Insert Dogemap claims discovered in a block.
+///
+/// `dogemap_map`: block_number → inscription_id (first wins within a block).
+/// Across blocks, `ON CONFLICT DO NOTHING` enforces first-wins semantics.
+pub async fn insert_dogemap_claims<T: GenericClient>(
+    dogemap_map: &HashMap<u32, String>,
+    claim_height: u64,
+    claim_timestamp: u32,
+    client: &T,
+) -> Result<(), String> {
+    for (block_number, inscription_id) in dogemap_map {
+        client
+            .execute(
+                "INSERT INTO dogemap_claims (block_number, inscription_id, claim_height, claim_timestamp)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (block_number) DO NOTHING",
+                &[
+                    &(*block_number as i64),
+                    inscription_id,
+                    &(claim_height as i64),
+                    &(claim_timestamp as i64),
+                ],
+            )
+            .await
+            .map_err(|e| format!("insert_dogemap_claims: {e}"))?;
+    }
+    Ok(())
+}
+
+pub async fn rollback_dogemap_claims<T: GenericClient>(
+    claim_height: u64,
+    client: &T,
+) -> Result<(), String> {
+    client
+        .execute(
+            "DELETE FROM dogemap_claims WHERE claim_height = $1",
+            &[&(claim_height as i64)],
+        )
+        .await
+        .map_err(|e| format!("rollback_dogemap_claims: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use dogecoin::types::{

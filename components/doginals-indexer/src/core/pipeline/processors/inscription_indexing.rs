@@ -121,10 +121,14 @@ pub async fn index_block(
 
         // Parsed DRC20 ops will be deposited here for this block.
         let mut drc20_operation_map = HashMap::new();
+        // DNS name → inscription_id (first wins within block)
+        let mut dns_map: HashMap<String, String> = HashMap::new();
+        // Dogemap block_number → inscription_id (first wins within block)
+        let mut dogemap_map: HashMap<u32, String> = HashMap::new();
 
         // Measure inscription parsing time
         let parsing_start = std::time::Instant::now();
-        parse_inscriptions_in_standardized_block(block, &mut drc20_operation_map, config, ctx);
+        parse_inscriptions_in_standardized_block(block, &mut drc20_operation_map, &mut dns_map, &mut dogemap_map, config, ctx);
         prometheus
             .metrics_record_inscription_parsing_time(parsing_start.elapsed().as_millis() as f64);
 
@@ -181,6 +185,23 @@ pub async fn index_block(
         if let Err(e) = doginals_pg::insert_block(block, &ord_tx).await {
             return Err(format!("Failed to insert block: {}", e));
         }
+
+        // DNS — write name registrations detected in this block
+        if !dns_map.is_empty() {
+            if let Err(e) = doginals_pg::insert_dns_names(&dns_map, block_height, block.timestamp, &ord_tx).await {
+                return Err(format!("Failed to insert DNS names: {}", e));
+            }
+            try_info!(ctx, "Indexed {} DNS name(s) at block #{block_height}", dns_map.len());
+        }
+
+        // Dogemap — write block claims detected in this block
+        if !dogemap_map.is_empty() {
+            if let Err(e) = doginals_pg::insert_dogemap_claims(&dogemap_map, block_height, block.timestamp, &ord_tx).await {
+                return Err(format!("Failed to insert Dogemap claims: {}", e));
+            }
+            try_info!(ctx, "Indexed {} Dogemap claim(s) at block #{block_height}", dogemap_map.len());
+        }
+
         prometheus.metrics_record_inscription_db_write_time(
             inscription_db_write_start.elapsed().as_millis() as f64,
         );
@@ -258,6 +279,8 @@ pub async fn rollback_block(
         let ord_tx = pg_begin(&mut ord_client).await?;
 
         doginals_pg::rollback_block(block_height, &ord_tx).await?;
+        doginals_pg::rollback_dns_names(block_height, &ord_tx).await?;
+        doginals_pg::rollback_dogemap_claims(block_height, &ord_tx).await?;
 
         // BRC-20
         if let Some(drc20_pool) = &pg_pools.drc20 {
