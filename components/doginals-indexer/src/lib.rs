@@ -204,7 +204,7 @@ async fn new_ordinals_indexer_runloop(
 
 // Re-export row types so callers (CLI) don't need to reach into db internals.
 pub use db::doginals_pg::{
-    DnsNameRow, DogemapClaimRow, LottoStatusRow, LottoSummaryRow, LottoWinnerRow,
+    DnsNameRow, DogemapClaimRow, LottoStatusRow, LottoSummaryRow, LottoTicketCardRow, LottoWinnerRow,
     BurnPointsRow, LottoTicketInfoRow,
 };
 
@@ -276,6 +276,19 @@ pub async fn lotto_list(
 }
 
 /// Get lotto ticket info by inscription ID (for burn detection).
+
+
+/// List lotto tickets for a specific lotto deployment.
+pub async fn lotto_list_tickets(
+    lotto_id: &str,
+    limit: usize,
+    offset: usize,
+    config: &Config,
+) -> Result<Vec<LottoTicketCardRow>, String> {
+    let pool = pg_pool(&config.doginals.as_ref().unwrap().db)?;
+    let client = pg_pool_client(&pool).await?;
+    db::doginals_pg::list_lotto_tickets(lotto_id, limit, offset, &client).await
+}
 pub async fn lotto_get_ticket_info(
     inscription_id: &str,
     config: &Config,

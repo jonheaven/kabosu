@@ -1805,6 +1805,18 @@ pub struct LottoStatusRow {
     pub winners: Vec<LottoWinnerRow>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LottoTicketCardRow {
+    pub inscription_id: String,
+    pub lotto_id: String,
+    pub ticket_id: String,
+    pub tx_id: String,
+    pub minted_height: u64,
+    pub minted_timestamp: u64,
+    pub seed_numbers: Vec<u16>,
+    pub tip_percent: u8,
+}
+
 pub async fn get_lotto_lottery<T: GenericClient>(
     lotto_id: &str,
     client: &T,
@@ -1863,6 +1875,43 @@ pub async fn list_lotto_lotteries<T: GenericClient>(
     Ok(rows
         .into_iter()
         .map(|row| lotto_summary_from_row(&row))
+        .collect())
+}
+
+pub async fn list_lotto_tickets<T: GenericClient>(
+    lotto_id: &str,
+    limit: usize,
+    offset: usize,
+    client: &T,
+) -> Result<Vec<LottoTicketCardRow>, String> {
+    let rows = client
+        .query(
+            "SELECT inscription_id, lotto_id, ticket_id, tx_id, minted_height, minted_timestamp, seed_numbers, tip_percent
+             FROM lotto_tickets
+             WHERE lotto_id = $1
+             ORDER BY minted_height DESC, inscription_id DESC
+             LIMIT $2 OFFSET $3",
+            &[&lotto_id, &(limit as i64), &(offset as i64)],
+        )
+        .await
+        .map_err(|e| format!("list_lotto_tickets: {e}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| LottoTicketCardRow {
+            inscription_id: r.get(0),
+            lotto_id: r.get(1),
+            ticket_id: r.get(2),
+            tx_id: r.get(3),
+            minted_height: r.get::<_, i64>(4) as u64,
+            minted_timestamp: r.get::<_, i64>(5) as u64,
+            seed_numbers: r
+                .get::<_, Vec<i32>>(6)
+                .into_iter()
+                .map(|v| v as u16)
+                .collect(),
+            tip_percent: r.get::<_, i32>(7) as u8,
+        })
         .collect())
 }
 

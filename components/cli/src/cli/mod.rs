@@ -133,6 +133,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                     doginals_pool,
                                     drc20_pool,
                                     dunes_pool,
+                                    config.protocols.lotto.burn_address.clone(),
                                 ).await {
                                     eprintln!("Web server error: {}", e);
                                 }

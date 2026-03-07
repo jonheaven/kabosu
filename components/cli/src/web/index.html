@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Doghook Explorer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 1rem 2rem; }
+    .ticket { border: 1px solid #ddd; border-radius: 8px; padding: .75rem; margin-bottom: .75rem; }
+    .ticket-grid { display: grid; grid-template-columns: 190px 1fr; gap: .75rem; }
+    .actions { margin-top: .5rem; display: flex; gap: .5rem; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Doghook Explorer — Lotto</h1>
+  <div style="margin-bottom:.75rem; display:flex; gap:.5rem; align-items:center;">
+    <label for="walletAddress">Wallet Address:</label>
+    <input id="walletAddress" placeholder="D..." style="min-width:360px;" />
+    <button id="refreshBtn">Refresh</button>
+  </div>
+  <p id="burnPoints" class="muted">Enter wallet address to view Burn Points.</p>
+  <div id="tickets"></div>
+
+  <script>
+    const state = { burnAddress: '' };
+    const BURNERS_BONUS_TARGET = 10;
+
+    async function fetchJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    function ticketQrText(ticket) {
+      const payload = {
+        inscription_id: ticket.inscription_id,
+        lotto_id: ticket.lotto_id,
+        ticket_id: ticket.ticket_id,
+        seed_numbers: ticket.seed_numbers,
+        minted_height: ticket.minted_height
+      };
+      const asJson = JSON.stringify(payload);
+      return asJson.length ? asJson : ticket.inscription_id;
+    }
+
+    function renderQr(el, text) {
+      el.innerHTML = '';
+      new QRCode(el, { text, width: 170, height: 170 });
+    }
+
+    function printTicket(ticket) {
+      const qrText = ticketQrText(ticket);
+      const w = window.open('', '_blank', 'width=500,height=700');
+      if (!w) return;
+      w.document.write(`
+        <html><head><title>Print Ticket ${ticket.ticket_id}</title>
+        <style>body{font-family:sans-serif;padding:16px}.qr{margin:10px 0}</style>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+        </head><body>
+          <h2>Lotto Ticket</h2>
+          <div><strong>Lotto:</strong> ${ticket.lotto_id}</div>
+          <div><strong>Ticket:</strong> ${ticket.ticket_id}</div>
+          <div><strong>Inscription:</strong> ${ticket.inscription_id}</div>
+          <div><strong>Seed Numbers:</strong> ${(ticket.seed_numbers || []).join(', ')}</div>
+          <div id="printQr" class="qr"></div>
+          <script>
+            new QRCode(document.getElementById('printQr'), { text: ${JSON.stringify(qrText)}, width: 220, height: 220 });
+            window.onload = () => window.print();
+          <\/script>
+        </body></html>
+      `);
+      w.document.close();
+    }
+
+    function burnTicket(ticket) {
+      if (!state.burnAddress) {
+        alert('Burn address is not configured.');
+        return;
+      }
+      if (!confirm(`Burn ticket ${ticket.ticket_id}? This will prepare wallet send to ${state.burnAddress}.`)) return;
+
+      const uri = `dogecoin:${state.burnAddress}?amount=0.00001&label=Doghook%20Burn&message=${encodeURIComponent(`burn ticket ${ticket.inscription_id}`)}`;
+      window.location.href = uri;
+      setTimeout(refreshLotto, 5000);
+    }
+
+    function renderBurnPoints(points) {
+      const more = Math.max(BURNERS_BONUS_TARGET - points, 0);
+      document.getElementById('burnPoints').textContent =
+        `You have ${points} Burn Points — ${more} more for next Burners Bonus entry`;
+    }
+
+    async function refreshLotto() {
+      const address = document.getElementById('walletAddress').value.trim();
+      const root = document.getElementById('tickets');
+      root.innerHTML = '<p class="muted">Loading...</p>';
+
+      const cfg = await fetchJson('/api/lotto/config');
+      state.burnAddress = cfg.burn_address || '';
+
+      if (address) {
+        const points = await fetchJson(`/api/lotto/burn-points/${encodeURIComponent(address)}`);
+        renderBurnPoints((points && points.burn_points) || 0);
+      } else {
+        document.getElementById('burnPoints').textContent = 'Enter wallet address to view Burn Points.';
+      }
+
+      const list = await fetchJson('/api/lotto/list?limit=3&offset=0');
+      const tickets = [];
+      for (const lotto of list.items || []) {
+        const data = await fetchJson(`/api/lotto/${encodeURIComponent(lotto.lotto_id)}/tickets?limit=6&offset=0`);
+        tickets.push(...(data.items || []));
+      }
+
+      root.innerHTML = '';
+      if (!tickets.length) {
+        root.innerHTML = '<p class="muted">No tickets found.</p>';
+        return;
+      }
+
+      tickets.forEach((ticket, i) => {
+        const card = document.createElement('article');
+        card.className = 'ticket';
+        card.innerHTML = `
+          <div class="ticket-grid">
+            <div id="qr-${i}"></div>
+            <div>
+              <div><strong>Lotto:</strong> ${ticket.lotto_id}</div>
+              <div><strong>Ticket:</strong> ${ticket.ticket_id}</div>
+              <div><strong>Inscription:</strong> ${ticket.inscription_id}</div>
+              <div><strong>Seed:</strong> ${(ticket.seed_numbers || []).join(', ')}</div>
+              <div class="actions">
+                <button data-print="1">Print Ticket</button>
+                <button data-burn="1">Burn Ticket</button>
+              </div>
+            </div>
+          </div>
+        `;
+        card.querySelector('[data-print]').addEventListener('click', () => printTicket(ticket));
+        card.querySelector('[data-burn]').addEventListener('click', () => burnTicket(ticket));
+        root.appendChild(card);
+        renderQr(card.querySelector(`#qr-${i}`), ticketQrText(ticket));
+      });
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', refreshLotto);
+    refreshLotto().catch(err => {
+      document.getElementById('tickets').innerHTML = `<p>Failed to load Lotto UI: ${err.message}</p>`;
+    });
+  </script>
+</body>
+</html>
