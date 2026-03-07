@@ -346,16 +346,20 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 let seed_numbers = if let Some(seed_numbers) = &cmd.seed_numbers {
                     parse_seed_numbers_for_lotto(
                         seed_numbers,
-                        status.summary.main_numbers_pick,
-                        status.summary.main_numbers_max,
+                        LOTTO_QUICKPICK_PICK,
+                        LOTTO_QUICKPICK_MAX,
                     )?
-                } else {
+                } else if cmd.quickpick {
                     doginals_indexer::core::meta_protocols::lotto::quickpick_for_config(
                         &doginals_indexer::core::meta_protocols::lotto::NumberConfig {
-                            pick: status.summary.main_numbers_pick,
-                            max: status.summary.main_numbers_max,
+                            pick: LOTTO_QUICKPICK_PICK,
+                            max: LOTTO_QUICKPICK_MAX,
                         },
                     )
+                } else {
+                    return Err(
+                        "lotto mint requires either --quickpick or --seed-numbers".into(),
+                    );
                 };
                 let ticket_id = cmd
                     .ticket_id
@@ -650,6 +654,9 @@ fn generate_ticket_id() -> String {
         .unwrap_or_default();
     format!("ticket-{}-{}", now.as_secs(), now.subsec_nanos())
 }
+
+const LOTTO_QUICKPICK_PICK: u16 = 69;
+const LOTTO_QUICKPICK_MAX: u16 = 420;
 
 struct AtomicLottoMintResult {
     txid: Txid,
@@ -947,3 +954,6 @@ fn parse_dogecoin_address(addr: &str) -> Result<ScriptBuf, String> {
         _ => Err(format!("unsupported Dogecoin address version '{}' for '{}'", version, addr)),
     }
 }
+
+
+
