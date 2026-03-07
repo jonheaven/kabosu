@@ -119,6 +119,12 @@ pub enum LottoCommand {
     /// List indexed lottos
     #[clap(name = "list")]
     List(LottoListCommand),
+    /// Transfer an expired ticket to the burn address to earn Burn Points
+    #[clap(name = "burn")]
+    Burn(LottoBurnCommand),
+    /// Show Burn Points leaderboard
+    #[clap(name = "burners")]
+    Burners(LottoBurnersCommand),
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -169,6 +175,9 @@ pub struct LottoMintCommand {
     /// Comma-separated seed numbers. Must contain exactly 69 unique numbers in [1, 420].
     #[clap(long)]
     pub seed_numbers: Option<String>,
+    /// Optional immutable protocol developer tip percentage (0-10).
+    #[clap(long, default_value = "0")]
+    pub tip: u8,
     #[clap(long = "config-path")]
     pub config_path: String,
     /// Output the broadcast result as JSON
@@ -195,6 +204,32 @@ pub struct LottoListCommand {
     /// Maximum number of results
     #[clap(long, default_value = "100")]
     pub limit: usize,
+    #[clap(long = "config-path")]
+    pub config_path: String,
+    /// Output as JSON
+    #[clap(long)]
+    pub json: bool,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+pub struct LottoBurnCommand {
+    /// Inscription ID of the ticket to burn (e.g. 1234567i0)
+    pub ticket_inscription_id: String,
+    #[clap(long = "config-path")]
+    pub config_path: String,
+    /// Output as JSON
+    #[clap(long)]
+    pub json: bool,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+pub struct LottoBurnersCommand {
+    /// Maximum number of burners to show
+    #[clap(long, default_value = "10")]
+    pub limit: usize,
+    /// Optional: show burn points for a specific address
+    #[clap(long)]
+    pub address: Option<String>,
     #[clap(long = "config-path")]
     pub config_path: String,
     /// Output as JSON

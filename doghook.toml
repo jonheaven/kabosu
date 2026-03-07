@@ -69,6 +69,8 @@ enabled = true
 [protocols.lotto]
 enabled = true
 content_prefixes = ['{"p":"doge-lotto"']
+protocol_dev_address = ""
+# Optional destination for immutable lotto mint tips (set this before using `doghook lotto mint --tip`).
 
 # Webhook delivery configuration.
 # When enabled = true, doghook POSTs a JSON event to every URL in the list

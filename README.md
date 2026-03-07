@@ -27,11 +27,17 @@ Both projects are completely independent codebases. doghook does not import dog.
 | Dunes | Full | `doghook dunes service start` |
 | DNS (Dogecoin Name System) | Full — 28 namespaces, first-wins, reorg-safe | `doghook dns resolve`, `doghook dns list` |
 | Dogemap (block claims) | Full — first-wins, reorg-safe | `doghook dogemap status`, `doghook dogemap list` |
-| doge-lotto | Full — deploys, atomic ticket mints, auto-resolution | `doghook lotto deploy`, `doghook lotto mint`, `doghook lotto list`, `doghook lotto status` |
+| doge-lotto | Full — deploys, atomic ticket mints, auto-resolution, Burners mechanic | `doghook lotto deploy`, `doghook lotto mint`, `doghook lotto list`, `doghook lotto status`, `doghook lotto burn`, `doghook lotto burners` |
 
 ### doge-lotto
 
-`doghook lotto mint` now broadcasts one atomic transaction that both pays the deploy's `prize_pool_address` the exact `ticket_price_koinu` amount and inscribes the `doge-lotto` ticket JSON in the same tx, so the indexer can verify payment trustlessly.
+`doghook lotto mint` broadcasts one atomic transaction that:
+
+- Pays the deploy's `prize_pool_address` the exact `ticket_price_koinu` amount.
+- Optionally pays an immutable protocol developer tip in the same transaction.
+- Inscribes the `doge-lotto` mint JSON in the same transaction.
+
+This lets the indexer verify payment and tip commitments trustlessly.
 
 Example deploy payload with explicit ticket cutoff (if omitted, defaults to `draw_block - 10`):
 
@@ -47,6 +53,93 @@ doghook lotto deploy \
    --rollover-enabled \
    --json
 ```
+
+**Note:** The `prize_pool_address` receives all ticket payments and holds prizes. Any unclaimed prizes after 30 days support ongoing protocol development (see Unclaimed Prizes section below).
+
+#### Optional Immutable Tip To Protocol Developers
+
+Mints can include `--tip <0-10>` (default `0`) to commit an immutable protocol-dev tip percentage.
+
+- `tip_percent` is written into the mint inscription JSON.
+- The same atomic mint transaction sends `ticket_price_koinu * tip_percent / 100` to `protocols.lotto.protocol_dev_address`.
+- The committed tip percent is stored per ticket and applied if that ticket wins.
+- Winner payouts are automatically reduced by the committed tip amount, and the deduction is recorded.
+
+Example mint with a 5% immutable tip:
+
+```bash
+doghook lotto mint \
+   --lotto doge-69-420 \
+   --quickpick \
+   --tip 5 \
+   --config-path doghook.toml
+```
+
+Set the protocol dev destination in config:
+
+```toml
+[protocols.lotto]
+enabled = true
+burn_address = "DBurnXXXXXXXXXXXXXXXXXXXXXXX9eVvaA"
+protocol_dev_address = "Dxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+#### Burners — Reward Losing Tickets
+
+Users can transfer expired lottery tickets to the official burn address (`DBurnXXXXXXXXXXXXXXXXXXXXXXX9eVvaA` by default) to earn **Burn Points**.
+
+- **1 burned ticket = 1 Burn Point**
+- **Every 10 Burn Points = 1 automatic entry into the monthly "Burners Bonus Draw"**
+- Bonus draws are funded separately (1% protocol fee or dedicated pool)
+- Only tickets from **resolved or expired lotteries** can be burned
+
+**Burn a ticket:**
+```bash
+# Get ticket info and burn address
+doghook lotto burn <ticket-inscription-id> --config-path doghook.toml
+
+# Then use your wallet to transfer the inscription to the burn address
+```
+
+**Check Burn Points:**
+```bash
+# View your own burn points
+doghook lotto burners --address D1abc... --config-path doghook.toml
+
+# View leaderboard (top 10 burners)
+doghook lotto burners --config-path doghook.toml
+
+# JSON output
+doghook lotto burners --config-path doghook.toml --json
+```
+
+#### Unclaimed Prizes — Supporting Protocol Development
+
+**The 30-Day Rule:**
+- Prizes that remain unclaimed for **30 days after the draw block** are permanently considered donations to the protocol developers.
+- The `prize_pool_address` (set during lottery deployment) permanently holds all ticket payments and unclaimed prizes.
+- Winners have 30 days to claim their prizes by transferring the winning ticket inscription to their desired address.
+- After 30 days, unclaimed funds remain in the prize pool address to support ongoing doghook development and infrastructure.
+
+**For Protocol-Level Lotteries (`doge-69-420` and `doge-max`):**
+- This is **explicit public policy** — all participants acknowledge that unclaimed prizes fund future development.
+- The protocol developers maintain the prize pool wallets for these official lotteries.
+- Transparency: all prize pool addresses are publicly visible on-chain and in deploy inscriptions.
+
+**For Community/Mini Lotteries:**
+- Deployers set their own `prize_pool_address` and manage unclaimed funds according to their stated rules.
+- The 30-day window is a recommended best practice but enforced at the social/community level.
+
+**Check Prize Status:**
+```bash
+# View lottery status including unclaimed prizes
+doghook lotto status <lotto-id> --config-path doghook.toml
+```
+
+The `lotto status` command shows:
+- Total prize pool and net prizes awarded
+- List of unclaimed wins with their age (days since draw)
+- Clear indication when prizes enter the unclaimed/development fund after 30 days
 
 ### DNS — Dogecoin Name System
 

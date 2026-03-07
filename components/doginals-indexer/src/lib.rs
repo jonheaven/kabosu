@@ -205,6 +205,7 @@ async fn new_ordinals_indexer_runloop(
 // Re-export row types so callers (CLI) don't need to reach into db internals.
 pub use db::doginals_pg::{
     DnsNameRow, DogemapClaimRow, LottoStatusRow, LottoSummaryRow, LottoWinnerRow,
+    BurnPointsRow, LottoTicketInfoRow,
 };
 
 /// Look up a single DNS name registration.
@@ -272,6 +273,36 @@ pub async fn lotto_list(
     let rows = db::doginals_pg::list_lotto_lotteries(limit, offset, &client).await?;
     let total = db::doginals_pg::count_lotto_lotteries(&client).await?;
     Ok((rows, total))
+}
+
+/// Get lotto ticket info by inscription ID (for burn detection).
+pub async fn lotto_get_ticket_info(
+    inscription_id: &str,
+    config: &Config,
+) -> Result<Option<LottoTicketInfoRow>, String> {
+    let pool = pg_pool(&config.doginals.as_ref().unwrap().db)?;
+    let client = pg_pool_client(&pool).await?;
+    db::doginals_pg::get_lotto_ticket_by_inscription(inscription_id, &client).await
+}
+
+/// Get burn points for a specific address.
+pub async fn lotto_get_burn_points(
+    owner_address: &str,
+    config: &Config,
+) -> Result<Option<BurnPointsRow>, String> {
+    let pool = pg_pool(&config.doginals.as_ref().unwrap().db)?;
+    let client = pg_pool_client(&pool).await?;
+    db::doginals_pg::get_burn_points(owner_address, &client).await
+}
+
+/// Get top burners leaderboard.
+pub async fn lotto_get_top_burners(
+    limit: usize,
+    config: &Config,
+) -> Result<Vec<BurnPointsRow>, String> {
+    let pool = pg_pool(&config.doginals.as_ref().unwrap().db)?;
+    let client = pg_pool_client(&pool).await?;
+    db::doginals_pg::get_top_burners(limit, &client).await
 }
 
 pub async fn get_chain_tip(config: &Config) -> Result<BlockIdentifier, String> {

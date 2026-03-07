@@ -59,6 +59,8 @@ impl Default for ProtocolsConfig {
             lotto: LottoProtocolConfig {
                 enabled: true,
                 content_prefixes: vec![r#"{"p":"doge-lotto""#.to_string()],
+                burn_address: "DBurnXXXXXXXXXXXXXXXXXXXXXXX9eVvaA".to_string(),
+                protocol_dev_address: String::new(),
             },
         }
     }
@@ -68,6 +70,8 @@ impl Default for ProtocolsConfig {
 pub struct LottoProtocolConfig {
     pub enabled: bool,
     pub content_prefixes: Vec<String>,
+    pub burn_address: String,
+    pub protocol_dev_address: String,
 }
 
 #[derive(Clone, Debug)]

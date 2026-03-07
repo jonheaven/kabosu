@@ -85,6 +85,7 @@ pub struct LottoMint {
     pub lotto_id: String,
     pub ticket_id: String,
     pub seed_numbers: Vec<u16>,
+    pub tip_percent: u8,
 }
 
 #[derive(Deserialize)]
@@ -112,6 +113,7 @@ struct RawMint {
     lotto_id: Option<String>,
     ticket_id: Option<String>,
     seed_numbers: Option<Vec<u16>>,
+    tip_percent: Option<u8>,
 }
 
 pub fn try_parse_lotto_deploy(body: &[u8]) -> Option<LottoDeploy> {
@@ -182,11 +184,16 @@ pub fn try_parse_lotto_mint(body: &[u8]) -> Option<LottoMint> {
     let lotto_id = normalize_lotto_id(raw.lotto_id?)?;
     let ticket_id = normalize_ticket_id(raw.ticket_id?)?;
     let seed_numbers = normalize_seed_numbers(raw.seed_numbers?, GLOBAL_NUMBER_MAX)?;
+    let tip_percent = raw.tip_percent.unwrap_or(0);
+    if tip_percent > 10 {
+        return None;
+    }
 
     Some(LottoMint {
         lotto_id,
         ticket_id,
         seed_numbers,
+        tip_percent,
     })
 }
 

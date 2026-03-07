@@ -113,6 +113,8 @@ pub struct ProtocolsConfigToml {
 pub struct LottoProtocolConfigToml {
     pub enabled: Option<bool>,
     pub content_prefixes: Option<Vec<String>>,
+    pub burn_address: Option<String>,
+    pub protocol_dev_address: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -229,6 +231,16 @@ impl ConfigToml {
                         .as_ref()
                         .and_then(|l| l.content_prefixes.clone())
                         .unwrap_or_else(|| vec![r#"{"p":"doge-lotto""#.to_string()]),
+                    burn_address: p
+                        .lotto
+                        .as_ref()
+                        .and_then(|l| l.burn_address.clone())
+                        .unwrap_or_else(|| "DBurnXXXXXXXXXXXXXXXXXXXXXXX9eVvaA".to_string()),
+                    protocol_dev_address: p
+                        .lotto
+                        .as_ref()
+                        .and_then(|l| l.protocol_dev_address.clone())
+                        .unwrap_or_default(),
                 },
             }
         };

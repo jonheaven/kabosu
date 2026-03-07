@@ -297,7 +297,11 @@ pub async fn index_block(
                 continue;
             }
 
-            let (payment_ok, reason) = doginals_pg::verify_lotto_payment(&parsed, &deploy);
+            let (payment_ok, reason) = doginals_pg::verify_lotto_payment(
+                &parsed,
+                &deploy,
+                &config.protocols.lotto.protocol_dev_address,
+            );
             if !payment_ok {
                 try_warn!(
                     ctx,
@@ -314,12 +318,13 @@ pub async fn index_block(
 
         let inserted_lotto_tickets = if !verified_lotto_mints.is_empty() {
             // Ticket insertion re-validates the mint against the stored deploy and
-            // checks the prize-pool payment on this same transaction's outputs,
+            // checks the prize-pool payment + immutable tip payment on this same tx,
             // and enforces persisted deploy cutoff_block.
             match doginals_pg::insert_lotto_tickets(
                 &verified_lotto_mints,
                 block_height,
                 block.timestamp,
+                &config.protocols.lotto.protocol_dev_address,
                 &ord_tx,
             )
             .await
@@ -340,6 +345,17 @@ pub async fn index_block(
         .await
         .map_err(|e| format!("Failed to resolve doge-lotto draws: {}", e))?;
 
+        // Burners: Detect lotto ticket burns (transfers to burn address)
+        let burn_events = detect_lotto_burns(
+            block,
+            &config.protocols.lotto.burn_address,
+            block_height,
+            block.timestamp,
+            &ord_tx,
+            ctx,
+        )
+        .await?;
+
         let webhook_urls = config.webhook_urls().to_vec();
         if !webhook_urls.is_empty() {
             for ticket in &inserted_lotto_tickets {
@@ -351,6 +367,7 @@ pub async fn index_block(
                     ticket.minted_height,
                     ticket.minted_timestamp,
                     &ticket.seed_numbers,
+                    ticket.tip_percent,
                 );
                 webhooks::fire_webhooks(&webhook_urls, payload, ctx).await;
             }
@@ -363,6 +380,9 @@ pub async fn index_block(
                     winner.rank,
                     winner.score,
                     winner.payout_bps,
+                    winner.gross_payout_koinu,
+                    winner.tip_percent,
+                    winner.tip_deduction_koinu,
                     winner.payout_koinu,
                     &winner.seed_numbers,
                     &winner.drawn_numbers,
@@ -371,13 +391,14 @@ pub async fn index_block(
             }
         }
 
-        if !lotto_deploy_map.is_empty() || !inserted_lotto_tickets.is_empty() || !resolved_lotto_winners.is_empty() {
+        if !lotto_deploy_map.is_empty() || !inserted_lotto_tickets.is_empty() || !resolved_lotto_winners.is_empty() || !burn_events.is_empty() {
             try_info!(
                 ctx,
-                "doge-lotto at block #{block_height}: {} deploy(s), {} ticket mint(s), {} winner record(s)",
+                "doge-lotto at block #{block_height}: {} deploy(s), {} ticket mint(s), {} winner record(s), {} burn(s)",
                 lotto_deploy_map.len(),
                 inserted_lotto_tickets.len(),
                 resolved_lotto_winners.len(),
+                burn_events.len(),
             );
         }
 
@@ -461,6 +482,7 @@ pub async fn rollback_block(
         doginals_pg::rollback_dns_names(block_height, &ord_tx).await?;
         doginals_pg::rollback_dogemap_claims(block_height, &ord_tx).await?;
         doginals_pg::rollback_lotto_resolutions(block_height, &ord_tx).await?;
+        doginals_pg::rollback_lotto_burns(block_height, &ord_tx).await?;
         doginals_pg::rollback_lotto_tickets(block_height, &ord_tx).await?;
         doginals_pg::rollback_lotto_lotteries(block_height, &ord_tx).await?;
 
@@ -491,4 +513,103 @@ pub async fn rollback_block(
         );
     }
     Ok(())
+}
+
+/// Detect lotto ticket burns for the "Burners" mechanic.
+/// Returns a list of (inscription_id, owner_address) for all burned tickets.
+async fn detect_lotto_burns<T: deadpool_postgres::GenericClient>(
+    _block: &DogecoinBlockData,
+    burn_address: &str,
+    block_height: u64,
+    block_timestamp: u32,
+    client: &T,
+    ctx: &Context,
+) -> Result<Vec<(String, String)>, String> {
+    let mut burned = Vec::new();
+
+    // Query inscriptions transferred TO burn address in this block
+    // by looking at the inscription_transfers table
+    let rows = client
+        .query(
+            "SELECT DISTINCT it.inscription_id, it.block_height, it.tx_id
+             FROM inscription_transfers it
+             JOIN lotto_tickets lt ON it.inscription_id = lt.inscription_id
+             WHERE it.block_height = $1
+               AND it.updated_address = $2",
+            &[&(block_height as i64), &burn_address],
+        )
+        .await
+        .map_err(|e| format!("detect_lotto_burns (query transfers): {e}"))?;
+
+    for row in rows {
+        let inscription_id: String = row.get(0);
+        let tx_id: String = row.get(2);
+
+        // Get ticket info
+        if let Some(ticket_info) = doginals_pg::get_lotto_ticket_by_inscription(&inscription_id, client).await? {
+            // Get lottery to check if resolved/expired
+            if let Some(lotto_full) = doginals_pg::get_lotto_lottery(&ticket_info.lotto_id, client).await? {
+                // Only allow burning tickets from resolved or expired lotteries
+                if lotto_full.summary.resolved || block_height > lotto_full.summary.draw_block {
+                    // Get the previous owner (sender) from inscription_transfers
+                    // This is the address that sent the inscription to burn_address
+                    let owner_query = client
+                        .query_opt(
+                            "SELECT updated_address
+                             FROM inscription_transfers
+                             WHERE inscription_id = $1
+                               AND block_height < $2
+                             ORDER BY block_height DESC, tx_index DESC
+                             LIMIT 1",
+                            &[&inscription_id, &(block_height as i64)],
+                        )
+                        .await
+                        .map_err(|e| format!("detect_lotto_burns (get prev owner): {e}"))?;
+
+                    let owner_address = if let Some(owner_row) = owner_query {
+                        owner_row.get::<_, String>(0)
+                    } else {
+                        // Fallback: genesis address from inscriptions table
+                        let genesis_query = client
+                            .query_opt(
+                                "SELECT genesis_address FROM inscriptions WHERE id = $1",
+                                &[&inscription_id],
+                            )
+                            .await
+                            .map_err(|e| format!("detect_lotto_burns (get genesis): {e}"))?;
+                        if let Some(g) = genesis_query {
+                            g.get(0)
+                        } else {
+                            continue; // Skip if we can't find owner
+                        }
+                    };
+
+                    // Record the burn
+                    doginals_pg::record_lotto_burn(
+                        &inscription_id,
+                        &ticket_info.lotto_id,
+                        &ticket_info.ticket_id,
+                        &owner_address,
+                        block_height,
+                        block_timestamp,
+                        &tx_id,
+                        client,
+                    )
+                    .await?;
+
+                    burned.push((inscription_id.clone(), owner_address.clone()));
+
+                    try_info!(
+                        ctx,
+                        "Burned lotto ticket {} ({}) from {} → +1 Burn Point",
+                        inscription_id,
+                        ticket_info.lotto_id,
+                        owner_address
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(burned)
 }

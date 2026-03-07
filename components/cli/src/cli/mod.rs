@@ -352,6 +352,15 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             LottoCommand::Mint(cmd) => {
                 let config = Config::from_file_path(&cmd.config_path)?;
                 config.assert_doginals_config()?;
+                if !(0..=10).contains(&cmd.tip) {
+                    return Err("tip must be between 0 and 10".into());
+                }
+                if cmd.tip > 0 && config.protocols.lotto.protocol_dev_address.trim().is_empty() {
+                    return Err(
+                        "protocols.lotto.protocol_dev_address must be set when using --tip"
+                            .into(),
+                    );
+                }
                 let Some(status) = doginals_indexer::lotto_status(&cmd.lotto_id, &config).await? else {
                     return Err(format!("Lotto not found: {}", cmd.lotto_id));
                 };
@@ -392,12 +401,14 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     "lotto_id": cmd.lotto_id,
                     "ticket_id": ticket_id,
                     "seed_numbers": seed_numbers,
+                    "tip_percent": cmd.tip,
                 });
                 let payload = compact_json_without_nulls(payload)?;
                 let result = broadcast_atomic_lotto_mint(
                     &config,
                     &status.summary.prize_pool_address,
                     status.summary.ticket_price_koinu,
+                    cmd.tip,
                     &payload,
                     ctx,
                 )?;
@@ -416,6 +427,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                 "address": status.summary.prize_pool_address,
                                 "amount_koinu": status.summary.ticket_price_koinu,
                             },
+                            "tip_percent": cmd.tip,
+                            "tip_koinu": result.tip_koinu,
+                            "protocol_dev_address": config.protocols.lotto.protocol_dev_address,
                             "fee_koinu": result.fee_koinu,
                             "change_koinu": result.change_koinu,
                         })
@@ -426,6 +440,14 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     println!("Ticket ID:              {}", ticket_id);
                     println!("Payment Address:        {}", status.summary.prize_pool_address);
                     println!("Ticket Price (koinu):   {}", status.summary.ticket_price_koinu);
+                    println!("Tip Percent:            {}", cmd.tip);
+                    println!("Tip Amount (koinu):     {}", result.tip_koinu);
+                    if cmd.tip > 0 {
+                        println!(
+                            "Protocol Dev Address:   {}",
+                            config.protocols.lotto.protocol_dev_address
+                        );
+                    }
                     println!("Fee (koinu):            {}", result.fee_koinu);
                     println!("Change (koinu):         {}", result.change_koinu);
                 }
@@ -440,6 +462,22 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             .summary
                             .cutoff_block
                             .saturating_sub(chain_tip.index);
+                                                // Calculate days since draw for unclaimed prize policy (1 block ≈ 1 minute)
+                                                let days_since_draw = if let Some(resolved_height) = row.summary.resolved_height {
+                                                    let blocks_since = chain_tip.index.saturating_sub(resolved_height);
+                                                    blocks_since / 1440 // 1440 blocks per day
+                                                } else {
+                                                    0
+                                                };
+                                                let unclaimed_status = if row.summary.resolved {
+                                                    if days_since_draw >= 30 {
+                                                        "Development Fund (30+ days)"
+                                                    } else {
+                                                        "Claimable (Winners have 30 days)"
+                                                    }
+                                                } else {
+                                                    "Not Yet Drawn"
+                                                };
                         if cmd.json {
                             let winners: Vec<_> = row
                                 .winners
@@ -453,6 +491,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                         "rank": winner.rank,
                                         "score": winner.score,
                                         "payout_bps": winner.payout_bps,
+                                        "gross_payout_koinu": winner.gross_payout_koinu,
+                                        "tip_percent": winner.tip_percent,
+                                        "tip_deduction_koinu": winner.tip_deduction_koinu,
                                         "payout_koinu": winner.payout_koinu,
                                         "seed_numbers": winner.seed_numbers,
                                         "drawn_numbers": winner.drawn_numbers,
@@ -480,6 +521,8 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                     "verified_ticket_count": row.summary.verified_ticket_count,
                                     "verified_sales_koinu": row.summary.verified_sales_koinu,
                                     "net_prize_koinu": row.summary.net_prize_koinu,
+                                                                        "days_since_draw": days_since_draw,
+                                                                        "unclaimed_status": unclaimed_status,
                                     "rollover_occurred": row.summary.rollover_occurred,
                                     "current_ticket_count": row.summary.current_ticket_count,
                                     "payment_verification": if cmd.show_payment_verification {
@@ -517,6 +560,20 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             println!("Verified Ticket Count:  {}", row.summary.verified_ticket_count.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
                             println!("Verified Sales (koinu): {}", row.summary.verified_sales_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
                             println!("Net Prize (koinu):      {}", row.summary.net_prize_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
+                                                        if row.summary.resolved {
+                                                            let prize_doge = row.summary.net_prize_koinu.unwrap_or(0) as f64 / 100_000_000.0;
+                                                            println!(
+                                                                "Unclaimed Prize Pool:   {:.8} DOGE ({}, {} days since draw)",
+                                                                prize_doge,
+                                                                unclaimed_status,
+                                                                days_since_draw
+                                                            );
+                                                            if days_since_draw >= 30 {
+                                                                println!("  → Protocol developers thank participants for supporting development!");
+                                                            } else {
+                                                                println!("  → Winners: claim within 30 days or prizes support protocol development");
+                                                            }
+                                                        }
                             println!("Rollover Occurred:      {}", row.summary.rollover_occurred);
                             if cmd.show_payment_verification {
                                 println!("Payment Verification:   strict_same_transaction (enforced)");
@@ -531,14 +588,21 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                 println!("Winners:");
                                 for winner in &row.winners {
                                     println!(
-                                        "  rank {} ticket {} payout {} koinu score {} inscription {}",
+                                        "  rank {} ticket {} payout {} koinu (gross {} koinu, tip {}%, deduction {}) score {} inscription {}",
                                         winner.rank,
                                         winner.ticket_id,
                                         winner.payout_koinu,
+                                        winner.gross_payout_koinu,
+                                        winner.tip_percent,
+                                        winner.tip_deduction_koinu,
                                         winner.score,
                                         winner.inscription_id
                                     );
                                 }
+                                                   if row.summary.resolved && days_since_draw < 30 {
+                                                       println!("  Winners must transfer their ticket inscription to claim prizes.");
+                                                       println!("  Unclaimed prizes after 30 days become protocol development funds.");
+                                                   }
                             }
                         }
                     }
@@ -598,6 +662,127 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             row.resolved,
                             row.resolution_mode,
                         );
+                    }
+                }
+            }
+            LottoCommand::Burn(cmd) => {
+                let config = Config::from_file_path(&cmd.config_path)?;
+                config.assert_doginals_config()?;
+                
+                // Get ticket info from indexer
+                let ticket_info = doginals_indexer::lotto_get_ticket_info(&cmd.ticket_inscription_id, &config).await?;
+                if ticket_info.is_none() {
+                    if cmd.json {
+                        println!("{{\"error\": \"Ticket not found\"}}");
+                    } else {
+                        println!("Error: Ticket {} not found", cmd.ticket_inscription_id);
+                    }
+                    process::exit(1);
+                }
+                
+                let ticket_info = ticket_info.unwrap();
+                let burn_address = &config.protocols.lotto.burn_address;
+                
+                // TODO: Build and broadcast a transfer transaction to burn_address
+                // For now, just show info
+                if cmd.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ticket_inscription_id": cmd.ticket_inscription_id,
+                            "lotto_id": ticket_info.lotto_id,
+                            "ticket_id": ticket_info.ticket_id,
+                            "burn_address": burn_address,
+                            "action": "transfer_to_burn_address",
+                            "reward": "1 Burn Point (10 points = 1 Burners Bonus Draw entry)"
+                        })
+                    );
+                } else {
+                    println!("Lotto Ticket Burn");
+                    println!("─────────────────────────────────────────");
+                    println!("Ticket Inscription ID:  {}", cmd.ticket_inscription_id);
+                    println!("Lotto ID:               {}", ticket_info.lotto_id);
+                    println!("Ticket ID:              {}", ticket_info.ticket_id);
+                    println!("Burn Address:           {}", burn_address);
+                    println!();
+                    println!("To burn this ticket and earn 1 Burn Point:");
+                    println!("  Send inscription {} to {}", cmd.ticket_inscription_id, burn_address);
+                    println!("  (Use your Dogecoin wallet's inscription transfer feature)");
+                    println!();
+                    println!("Reward: +1 Burn Point");
+                    println!("Every 10 Burn Points = 1 entry into monthly Burners Bonus Draw!");
+                }
+            }
+            LottoCommand::Burners(cmd) => {
+                let config = Config::from_file_path(&cmd.config_path)?;
+                config.assert_doginals_config()?;
+                
+                if let Some(addr) = &cmd.address {
+                    // Show burn points for specific address
+                    let points = doginals_indexer::lotto_get_burn_points(addr, &config).await?;
+                    if cmd.json {
+                        if let Some(p) = points {
+                            println!(
+                                "{}",
+                                serde_json::json!({
+                                    "owner_address": p.owner_address,
+                                    "burn_points": p.burn_points,
+                                    "bonus_draw_entries": p.burn_points / 10,
+                                    "total_tickets_burned": p.total_tickets_burned,
+                                    "last_burn_height": p.last_burn_height,
+                                    "last_burn_timestamp": p.last_burn_timestamp,
+                                })
+                            );
+                        } else {
+                            println!("{{\"error\": \"No burn points found for address\"}}");
+                        }
+                    } else {
+                        if let Some(p) = points {
+                            println!("Burn Points for {}", p.owner_address);
+                            println!("─────────────────────────────────────────");
+                            println!("Burn Points:            {}", p.burn_points);
+                            println!("Bonus Draw Entries:     {} (10 points per entry)", p.burn_points / 10);
+                            println!("Total Tickets Burned:   {}", p.total_tickets_burned);
+                            if let Some(h) = p.last_burn_height {
+                                println!("Last Burn Block:        {}", h);
+                            }
+                        } else {
+                            println!("No burn points found for address: {}", addr);
+                        }
+                    }
+                } else {
+                    // Show leaderboard
+                    let burners = doginals_indexer::lotto_get_top_burners(cmd.limit, &config).await?;
+                    if cmd.json {
+                        let json_rows: Vec<_> = burners
+                            .iter()
+                            .map(|b| {
+                                serde_json::json!({
+                                    "owner_address": b.owner_address,
+                                    "burn_points": b.burn_points,
+                                    "bonus_draw_entries": b.burn_points / 10,
+                                    "total_tickets_burned": b.total_tickets_burned,
+                                })
+                            })
+                            .collect();
+                        println!("{}", serde_json::json!({ "burners": json_rows }));
+                    } else {
+                        println!("Burners Leaderboard — Top {} (every 10 points = 1 Bonus Draw entry)", cmd.limit);
+                        println!("{}", "─".repeat(90));
+                        println!(
+                            "{:<48} {:<12} {:<12} {}",
+                            "Address", "Points", "Entries", "Burned"
+                        );
+                        println!("{}", "─".repeat(90));
+                        for b in &burners {
+                            println!(
+                                "{:<48} {:<12} {:<12} {}",
+                                b.owner_address,
+                                b.burn_points,
+                                b.burn_points / 10,
+                                b.total_tickets_burned,
+                            );
+                        }
                     }
                 }
             }
@@ -709,6 +894,7 @@ const LOTTO_QUICKPICK_MAX: u16 = 420;
 
 struct AtomicLottoMintResult {
     txid: Txid,
+    tip_koinu: u64,
     fee_koinu: u64,
     change_koinu: u64,
 }
@@ -717,24 +903,43 @@ fn broadcast_atomic_lotto_mint(
     config: &Config,
     prize_pool_address: &str,
     ticket_price_koinu: u64,
+    tip_percent: u8,
     payload: &str,
     ctx: &Context,
 ) -> Result<AtomicLottoMintResult, String> {
     let client = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, ctx);
     let script_segments = build_lotto_inscription_segments(payload.as_bytes());
-    let output_count = if ticket_price_koinu > 0 { 2 } else { 1 };
+    let tip_koinu = ticket_price_koinu.saturating_mul(tip_percent as u64) / 100;
+    let output_count = 1
+        + usize::from(ticket_price_koinu > 0)
+        + usize::from(tip_koinu > 0);
     let fee_koinu =
         calc_lotto_fee(script_sig_size(&script_segments), output_count, DEFAULT_LOTTO_FEE_RATE);
-    let required_koinu = ticket_price_koinu.saturating_add(fee_koinu);
+    let required_koinu = ticket_price_koinu
+        .saturating_add(tip_koinu)
+        .saturating_add(fee_koinu);
     let (funding_txid, funding_vout, funding_value, funding_script) =
-        select_lotto_utxo(&client, required_koinu, ticket_price_koinu == 0)?;
+        select_lotto_utxo(
+            &client,
+            required_koinu,
+            ticket_price_koinu == 0 && tip_koinu == 0,
+        )?;
 
     let funding_koinu = funding_value.to_sat();
     let prize_pool_script = parse_dogecoin_address(prize_pool_address)?;
+    let protocol_dev_script = if tip_koinu > 0 {
+        Some(parse_dogecoin_address(
+            &config.protocols.lotto.protocol_dev_address,
+        )?)
+    } else {
+        None
+    };
     let (outputs, change_koinu) = build_atomic_lotto_outputs(
         &client,
         &prize_pool_script,
+        protocol_dev_script.as_ref(),
         ticket_price_koinu,
+        tip_koinu,
         funding_koinu,
         fee_koinu,
     )?;
@@ -778,6 +983,7 @@ fn broadcast_atomic_lotto_mint(
 
     Ok(AtomicLottoMintResult {
         txid,
+        tip_koinu,
         fee_koinu,
         change_koinu,
     })
@@ -786,14 +992,18 @@ fn broadcast_atomic_lotto_mint(
 fn build_atomic_lotto_outputs(
     client: &dogecoin::bitcoincore_rpc::Client,
     prize_pool_script: &ScriptBuf,
+    protocol_dev_script: Option<&ScriptBuf>,
     ticket_price_koinu: u64,
+    tip_koinu: u64,
     funding_koinu: u64,
     fee_koinu: u64,
 ) -> Result<(Vec<TxOut>, u64), String> {
-    let required_koinu = ticket_price_koinu.saturating_add(fee_koinu);
+    let required_koinu = ticket_price_koinu
+        .saturating_add(tip_koinu)
+        .saturating_add(fee_koinu);
     let change_koinu = funding_koinu.saturating_sub(required_koinu);
 
-    if ticket_price_koinu == 0 && change_koinu == 0 {
+    if ticket_price_koinu == 0 && tip_koinu == 0 && change_koinu == 0 {
         return Err(
             "free lotto mint requires a wallet UTXO larger than the estimated fee so the transaction can keep one standard output"
                 .into(),
@@ -807,6 +1017,16 @@ fn build_atomic_lotto_outputs(
         outputs.push(TxOut {
             value: Amount::from_sat(ticket_price_koinu),
             script_pubkey: prize_pool_script.clone(),
+        });
+    }
+
+    if tip_koinu > 0 {
+        let Some(protocol_dev_script) = protocol_dev_script else {
+            return Err("protocol dev address is required when tip amount is non-zero".into());
+        };
+        outputs.push(TxOut {
+            value: Amount::from_sat(tip_koinu),
+            script_pubkey: protocol_dev_script.clone(),
         });
     }
 

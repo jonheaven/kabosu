@@ -63,6 +63,7 @@ pub fn lotto_ticket_event(
     minted_height: u64,
     minted_timestamp: u64,
     seed_numbers: &[u16],
+    tip_percent: u8,
 ) -> Value {
     serde_json::json!({
         "event": "lotto.ticket_minted",
@@ -73,6 +74,7 @@ pub fn lotto_ticket_event(
         "minted_height": minted_height,
         "minted_timestamp": minted_timestamp,
         "seed_numbers": seed_numbers,
+        "tip_percent": tip_percent,
     })
 }
 
@@ -85,6 +87,9 @@ pub fn lotto_winner_event(
     rank: u32,
     score: u64,
     payout_bps: u32,
+    gross_payout_koinu: u64,
+    tip_percent: u8,
+    tip_deduction_koinu: u64,
     payout_koinu: u64,
     seed_numbers: &[u16],
     drawn_numbers: &[u16],
@@ -98,6 +103,9 @@ pub fn lotto_winner_event(
         "rank": rank,
         "score": score,
         "payout_bps": payout_bps,
+        "gross_payout_koinu": gross_payout_koinu,
+        "tip_percent": tip_percent,
+        "tip_deduction_koinu": tip_deduction_koinu,
         "payout_koinu": payout_koinu,
         "seed_numbers": seed_numbers,
         "drawn_numbers": drawn_numbers,

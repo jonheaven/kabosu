@@ -1346,6 +1346,9 @@ pub struct LottoWinnerRow {
     pub rank: u32,
     pub score: u64,
     pub payout_bps: u32,
+    pub gross_payout_koinu: u64,
+    pub tip_percent: u8,
+    pub tip_deduction_koinu: u64,
     pub payout_koinu: u64,
     pub seed_numbers: Vec<u16>,
     pub drawn_numbers: Vec<u16>,
@@ -1361,10 +1364,11 @@ pub struct LottoTicketRow {
     pub minted_height: u64,
     pub minted_timestamp: u64,
     pub seed_numbers: Vec<u16>,
+    pub tip_percent: u8,
 }
 
 #[derive(Debug, Clone)]
-struct StoredLottoRow {
+pub struct StoredLottoRow {
     lotto_id: String,
     template: LottoTemplate,
     draw_block: u64,
@@ -1385,6 +1389,7 @@ struct StoredTicketRow {
     ticket_id: String,
     seed_numbers: Vec<u16>,
     minted_height: u64,
+    tip_percent: u8,
 }
 
 impl StoredLottoRow {
@@ -1469,6 +1474,7 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
     lotto_mints: &[ParsedLottoMint],
     minted_height: u64,
     minted_timestamp: u32,
+    protocol_dev_address: &str,
     client: &T,
 ) -> Result<Vec<LottoTicketRow>, String> {
     let mut inserted = Vec::new();
@@ -1485,7 +1491,7 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
             continue;
         }
 
-        let (payment_ok, _reason) = verify_lotto_payment(parsed, &deploy);
+        let (payment_ok, _reason) = verify_lotto_payment(parsed, &deploy, protocol_dev_address);
         if !payment_ok {
             continue;
         }
@@ -1494,8 +1500,8 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
         let inserted_row = client
             .query_opt(
                 "INSERT INTO lotto_tickets (
-                    inscription_id, lotto_id, ticket_id, tx_id, minted_height, minted_timestamp, seed_numbers
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                          inscription_id, lotto_id, ticket_id, tx_id, minted_height, minted_timestamp, seed_numbers, tip_percent
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                  ON CONFLICT DO NOTHING
                  RETURNING inscription_id",
                 &[
@@ -1506,6 +1512,7 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
                     &(minted_height as i64),
                     &(minted_timestamp as i64),
                     &seed_numbers,
+                    &(parsed.mint.tip_percent as i32),
                 ],
             )
             .await
@@ -1520,6 +1527,7 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
                 minted_height,
                 minted_timestamp: minted_timestamp as u64,
                 seed_numbers: parsed.mint.seed_numbers.clone(),
+                tip_percent: parsed.mint.tip_percent,
             });
         }
     }
@@ -1536,6 +1544,18 @@ pub async fn get_lotto_deploy_by_id<T: GenericClient>(
         .map(|lotto| lotto.as_deploy()))
 }
 
+/// Resolve lottery winners at draw block.
+///
+/// UNCLAIMED PRIZE POLICY:
+/// Winners have 30 days after the draw block to claim prizes by transferring their
+/// winning ticket inscription to their desired address. Any prizes that remain unclaimed
+/// after 30 days are permanently considered donations to the protocol developers.
+///
+/// For protocol-level lotteries (doge-69-420, doge-max), the prize_pool_address is
+/// managed by the protocol developers, and unclaimed funds support ongoing development.
+///
+/// For community/mini lotteries, deployers manage their own prize_pool_address and
+/// unclaimed funds according to their stated rules (30-day window recommended).
 pub async fn resolve_lotto<T: GenericClient>(
     resolved_height: u64,
     resolved_block_hash: &str,
@@ -1609,12 +1629,17 @@ pub async fn resolve_lotto<T: GenericClient>(
             .map_err(|e| format!("resolve_lotto (update lottery): {e}"))?;
 
         for winner in &winner_rows {
+            // Winners are recorded on-chain. They have 30 days to claim by transferring
+            // their ticket inscription. Unclaimed prizes support protocol development.
+            // If a mint committed a tip_percent, the matching payout deduction is
+            // transparently persisted in tip_percent and tip_deduction_koinu.
             client
                 .execute(
                     "INSERT INTO lotto_winners (
                         lotto_id, inscription_id, ticket_id, resolved_height,
-                        rank, score, payout_bps, payout_koinu, seed_numbers, drawn_numbers, bonus_drawn_numbers
-                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                        rank, score, payout_bps, gross_payout_koinu, tip_percent, tip_deduction_koinu,
+                        payout_koinu, seed_numbers, drawn_numbers, bonus_drawn_numbers
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                      ON CONFLICT (lotto_id, inscription_id) DO NOTHING",
                     &[
                         &winner.lotto_id,
@@ -1624,6 +1649,9 @@ pub async fn resolve_lotto<T: GenericClient>(
                         &(winner.rank as i32),
                         &(winner.score as i64),
                         &(winner.payout_bps as i32),
+                        &(winner.gross_payout_koinu as i64),
+                        &(winner.tip_percent as i32),
+                        &(winner.tip_deduction_koinu as i64),
                         &(winner.payout_koinu as i64),
                         &seed_numbers_to_i32(&winner.seed_numbers),
                         &seed_numbers_to_i32(&winner.drawn_numbers),
@@ -1699,6 +1727,46 @@ pub async fn rollback_lotto_resolutions<T: GenericClient>(
         )
         .await
         .map_err(|e| format!("rollback_lotto_resolutions (reset lotteries): {e}"))?;
+
+    Ok(())
+}
+
+pub async fn rollback_lotto_burns<T: GenericClient>(
+    block_height: u64,
+    client: &T,
+) -> Result<(), String> {
+    // Get all burn events at this block to reverse burn points
+    let burn_events = client
+        .query(
+            "SELECT owner_address FROM lotto_burn_events WHERE burn_height = $1",
+            &[&(block_height as i64)],
+        )
+        .await
+        .map_err(|e| format!("rollback_lotto_burns (SELECT): {e}"))?;
+
+    // Decrement burn points for each burned ticket
+    for row in burn_events {
+        let owner_address: String = row.get(0);
+        client
+            .execute(
+                "UPDATE lotto_burn_points
+                 SET burn_points = GREATEST(burn_points - 1, 0),
+                     total_tickets_burned = GREATEST(total_tickets_burned - 1, 0)
+                 WHERE owner_address = $1",
+                &[&owner_address],
+            )
+            .await
+            .map_err(|e| format!("rollback_lotto_burns (UPDATE points): {e}"))?;
+    }
+
+    // Delete burn events
+    client
+        .execute(
+            "DELETE FROM lotto_burn_events WHERE burn_height = $1",
+            &[&(block_height as i64)],
+        )
+        .await
+        .map_err(|e| format!("rollback_lotto_burns (DELETE events): {e}"))?;
 
     Ok(())
 }
@@ -1813,7 +1881,8 @@ pub async fn list_lotto_winners<T: GenericClient>(
     let rows = client
         .query(
             "SELECT lotto_id, inscription_id, ticket_id, resolved_height, rank, score,
-                    payout_bps, payout_koinu, seed_numbers, drawn_numbers, bonus_drawn_numbers
+                    payout_bps, gross_payout_koinu, tip_percent, tip_deduction_koinu,
+                    payout_koinu, seed_numbers, drawn_numbers, bonus_drawn_numbers
              FROM lotto_winners
              WHERE lotto_id = $1
              ORDER BY rank ASC, inscription_id ASC",
@@ -1832,6 +1901,9 @@ pub async fn list_lotto_winners<T: GenericClient>(
                 rank: row.get::<_, i32>("rank") as u32,
                 score: row.get::<_, i64>("score") as u64,
                 payout_bps: row.get::<_, i32>("payout_bps") as u32,
+                gross_payout_koinu: row.get::<_, i64>("gross_payout_koinu") as u64,
+                tip_percent: row.get::<_, i32>("tip_percent") as u8,
+                tip_deduction_koinu: row.get::<_, i64>("tip_deduction_koinu") as u64,
                 payout_koinu: row.get::<_, i64>("payout_koinu") as u64,
                 seed_numbers: i32_seed_numbers_to_u16(row.get("seed_numbers"))?,
                 drawn_numbers: i32_seed_numbers_to_u16(row.get("drawn_numbers"))?,
@@ -1841,7 +1913,7 @@ pub async fn list_lotto_winners<T: GenericClient>(
         .collect()
 }
 
-async fn get_stored_lotto<T: GenericClient>(
+pub async fn get_stored_lotto<T: GenericClient>(
     lotto_id: &str,
     client: &T,
 ) -> Result<Option<StoredLottoRow>, String> {
@@ -1868,6 +1940,7 @@ async fn get_lotto_tickets_for_resolution<T: GenericClient>(
     let rows = client
         .query(
             "SELECT inscription_id, ticket_id, seed_numbers, minted_height
+                    , tip_percent
              FROM lotto_tickets
              WHERE lotto_id = $1 AND minted_height <= $2
              ORDER BY minted_height ASC, inscription_id ASC",
@@ -1884,6 +1957,7 @@ async fn get_lotto_tickets_for_resolution<T: GenericClient>(
                 ticket_id: row.get("ticket_id"),
                 seed_numbers: i32_seed_numbers_to_u16(seed_numbers)?,
                 minted_height: row.get::<_, i64>("minted_height") as u64,
+                tip_percent: row.get::<_, i32>("tip_percent") as u8,
             })
         })
         .collect()
@@ -2072,6 +2146,7 @@ struct ScoredTicketRow {
     score: u64,
     bonus_score: u64,
     minted_height: u64,
+    tip_percent: u8,
 }
 
 fn score_tickets(
@@ -2088,6 +2163,7 @@ fn score_tickets(
             score: score_ticket(&ticket.seed_numbers, &draw.main_numbers),
             bonus_score: bonus_score_for_ticket(ticket, draw, template),
             minted_height: ticket.minted_height,
+            tip_percent: ticket.tip_percent,
         })
         .collect();
     scored.sort_by(|left, right| {
@@ -2105,10 +2181,13 @@ fn winner_from_scored_ticket(
     resolved_height: u64,
     rank: u32,
     payout_bps: u32,
-    payout_koinu: u64,
+    gross_payout_koinu: u64,
     ticket: ScoredTicketRow,
     draw: &LottoDraw,
 ) -> LottoWinnerRow {
+    let tip_deduction_koinu = gross_payout_koinu.saturating_mul(ticket.tip_percent as u64) / 100;
+    let payout_koinu = gross_payout_koinu.saturating_sub(tip_deduction_koinu);
+
     LottoWinnerRow {
         lotto_id: lotto_id.to_string(),
         inscription_id: ticket.inscription_id,
@@ -2117,6 +2196,9 @@ fn winner_from_scored_ticket(
         rank,
         score: ticket.score,
         payout_bps,
+        gross_payout_koinu,
+        tip_percent: ticket.tip_percent,
+        tip_deduction_koinu,
         payout_koinu,
         seed_numbers: ticket.seed_numbers,
         drawn_numbers: draw.main_numbers.clone(),
@@ -2185,29 +2267,64 @@ fn bonus_score_for_ticket(
 pub fn verify_lotto_payment(
     tx: &crate::core::protocol::inscription_parsing::ParsedLottoMint,
     deploy: &LottoDeploy,
+    protocol_dev_address: &str,
 ) -> (bool, String) {
     // Atomic lotto mints are valid only when this same transaction pays the
-    // deploy's prize pool exactly `ticket_price_koinu`.
-    let paid_total = tx
-        .outputs
-        .iter()
-        .filter_map(|output| {
-            let script = script_buf_from_hex(&output.script_pubkey)?;
-            let address = dogecoin_address_from_script(&script)?;
-            if address == deploy.prize_pool_address {
-                Some(output.value)
-            } else {
-                None
-            }
-        })
-        .sum::<u64>();
+    // deploy's prize pool exactly `ticket_price_koinu` and includes any committed
+    // immutable tip payment to protocol_dev_address.
+    let mut paid_prize_pool_koinu = 0_u64;
+    let mut paid_protocol_dev_koinu = 0_u64;
 
-    if paid_total != deploy.ticket_price_koinu {
+    for output in &tx.outputs {
+        let Some(script) = script_buf_from_hex(&output.script_pubkey) else {
+            continue;
+        };
+        let Some(address) = dogecoin_address_from_script(&script) else {
+            continue;
+        };
+
+        if address == deploy.prize_pool_address {
+            paid_prize_pool_koinu = paid_prize_pool_koinu.saturating_add(output.value);
+        }
+        if !protocol_dev_address.is_empty() && address == protocol_dev_address {
+            paid_protocol_dev_koinu = paid_protocol_dev_koinu.saturating_add(output.value);
+        }
+    }
+
+    if paid_prize_pool_koinu != deploy.ticket_price_koinu {
         return (
             false,
             format!(
                 "payment mismatch in tx {}: expected {} koinu to {}, found {}",
-                tx.tx_id, deploy.ticket_price_koinu, deploy.prize_pool_address, paid_total
+                tx.tx_id,
+                deploy.ticket_price_koinu,
+                deploy.prize_pool_address,
+                paid_prize_pool_koinu
+            ),
+        );
+    }
+
+    let expected_tip_koinu = deploy
+        .ticket_price_koinu
+        .saturating_mul(tx.mint.tip_percent as u64)
+        / 100;
+
+    if expected_tip_koinu > 0 && protocol_dev_address.is_empty() {
+        return (
+            false,
+            format!(
+                "payment mismatch in tx {}: tip_percent={} requires protocol_dev_address",
+                tx.tx_id, tx.mint.tip_percent
+            ),
+        );
+    }
+
+    if paid_protocol_dev_koinu != expected_tip_koinu {
+        return (
+            false,
+            format!(
+                "payment mismatch in tx {}: expected {} koinu tip to {}, found {}",
+                tx.tx_id, expected_tip_koinu, protocol_dev_address, paid_protocol_dev_koinu
             ),
         );
     }
@@ -2296,6 +2413,156 @@ fn i32_seed_numbers_to_u16(seed_numbers: Vec<i32>) -> Result<Vec<u16>, String> {
             u16::try_from(number).map_err(|_| format!("invalid lotto seed number stored in db: {number}"))
         })
         .collect()
+}
+
+// ===========================
+// Burners: Burn Point tracking
+// ===========================
+
+/// Record a burn event: user sent expired ticket to burn address, earn 1 Burn Point.
+pub async fn record_lotto_burn<T: GenericClient>(
+    inscription_id: &str,
+    lotto_id: &str,
+    ticket_id: &str,
+    owner_address: &str,
+    burn_height: u64,
+    burn_timestamp: u32,
+    burn_tx_id: &str,
+    client: &T,
+) -> Result<(), String> {
+    // Insert burn event
+    client
+        .execute(
+            "INSERT INTO lotto_burn_events (inscription_id, lotto_id, ticket_id, owner_address, burn_height, burn_timestamp, burn_tx_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (inscription_id) DO NOTHING",
+            &[
+                &inscription_id,
+                &lotto_id,
+                &ticket_id,
+                &owner_address,
+                &(burn_height as i64),
+                &(burn_timestamp as i64),
+                &burn_tx_id,
+            ],
+        )
+        .await
+        .map_err(|e| format!("record_lotto_burn (event): {e}"))?;
+
+    // Increment burn points for owner
+    client
+        .execute(
+            "INSERT INTO lotto_burn_points (owner_address, burn_points, last_burn_height, last_burn_timestamp, total_tickets_burned)
+             VALUES ($1, 1, $2, $3, 1)
+             ON CONFLICT (owner_address) DO UPDATE SET
+                burn_points = lotto_burn_points.burn_points + 1,
+                last_burn_height = EXCLUDED.last_burn_height,
+                last_burn_timestamp = EXCLUDED.last_burn_timestamp,
+                total_tickets_burned = lotto_burn_points.total_tickets_burned + 1",
+            &[
+                &owner_address,
+                &(burn_height as i64),
+                &(burn_timestamp as i64),
+            ],
+        )
+        .await
+        .map_err(|e| format!("record_lotto_burn (points): {e}"))?;
+
+    Ok(())
+}
+
+/// Get burn points for a specific address.
+pub async fn get_burn_points<T: GenericClient>(
+    owner_address: &str,
+    client: &T,
+) -> Result<Option<BurnPointsRow>, String> {
+    let row = client
+        .query_opt(
+            "SELECT owner_address, burn_points, last_burn_height, last_burn_timestamp, total_tickets_burned
+             FROM lotto_burn_points
+             WHERE owner_address = $1",
+            &[&owner_address],
+        )
+        .await
+        .map_err(|e| format!("get_burn_points: {e}"))?;
+
+    match row {
+        Some(r) => Ok(Some(BurnPointsRow {
+            owner_address: r.get(0),
+            burn_points: r.get::<_, i64>(1) as u64,
+            last_burn_height: r.get::<_, Option<i64>>(2).map(|h| h as u64),
+            last_burn_timestamp: r.get::<_, Option<i64>>(3).map(|ts| ts as u64),
+            total_tickets_burned: r.get::<_, i64>(4) as u64,
+        })),
+        None => Ok(None),
+    }
+}
+
+/// Get top burners leaderboard.
+pub async fn get_top_burners<T: GenericClient>(
+    limit: usize,
+    client: &T,
+) -> Result<Vec<BurnPointsRow>, String> {
+    let rows = client
+        .query(
+            "SELECT owner_address, burn_points, last_burn_height, last_burn_timestamp, total_tickets_burned
+             FROM lotto_burn_points
+             ORDER BY burn_points DESC
+             LIMIT $1",
+            &[&(limit as i64)],
+        )
+        .await
+        .map_err(|e| format!("get_top_burners: {e}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| BurnPointsRow {
+            owner_address: r.get(0),
+            burn_points: r.get::<_, i64>(1) as u64,
+            last_burn_height: r.get::<_, Option<i64>>(2).map(|h| h as u64),
+            last_burn_timestamp: r.get::<_, Option<i64>>(3).map(|ts| ts as u64),
+            total_tickets_burned: r.get::<_, i64>(4) as u64,
+        })
+        .collect())
+}
+
+/// Get lotto ticket info by inscription_id (for burn detection).
+pub async fn get_lotto_ticket_by_inscription<T: GenericClient>(
+    inscription_id: &str,
+    client: &T,
+) -> Result<Option<LottoTicketInfoRow>, String> {
+    let row = client
+        .query_opt(
+            "SELECT lotto_id, ticket_id
+             FROM lotto_tickets
+             WHERE inscription_id = $1",
+            &[&inscription_id],
+        )
+        .await
+        .map_err(|e| format!("get_lotto_ticket_by_inscription: {e}"))?;
+
+    match row {
+        Some(r) => Ok(Some(LottoTicketInfoRow {
+            lotto_id: r.get(0),
+            ticket_id: r.get(1),
+        })),
+        None => Ok(None),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BurnPointsRow {
+    pub owner_address: String,
+    pub burn_points: u64,
+    pub last_burn_height: Option<u64>,
+    pub last_burn_timestamp: Option<u64>,
+    pub total_tickets_burned: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LottoTicketInfoRow {
+    pub lotto_id: String,
+    pub ticket_id: String,
 }
 
 #[cfg(test)]
