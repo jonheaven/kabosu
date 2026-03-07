@@ -185,6 +185,9 @@ pub struct LottoStatusCommand {
     /// Output as JSON
     #[clap(long)]
     pub json: bool,
+    /// Include payment verification details in the output
+    #[clap(long)]
+    pub show_payment_verification: bool,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]

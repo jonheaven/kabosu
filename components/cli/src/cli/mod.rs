@@ -482,6 +482,16 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                     "net_prize_koinu": row.summary.net_prize_koinu,
                                     "rollover_occurred": row.summary.rollover_occurred,
                                     "current_ticket_count": row.summary.current_ticket_count,
+                                    "payment_verification": if cmd.show_payment_verification {
+                                        serde_json::json!({
+                                            "mode": "strict_same_transaction",
+                                            "status": "enforced",
+                                            "verified_ticket_entries": row.summary.current_ticket_count,
+                                            "rule": "same tx must pay exact ticket_price_koinu to deploy prize_pool_address"
+                                        })
+                                    } else {
+                                        serde_json::Value::Null
+                                    },
                                     "winners": winners,
                                 })
                             );
@@ -508,6 +518,13 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             println!("Verified Sales (koinu): {}", row.summary.verified_sales_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
                             println!("Net Prize (koinu):      {}", row.summary.net_prize_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
                             println!("Rollover Occurred:      {}", row.summary.rollover_occurred);
+                            if cmd.show_payment_verification {
+                                println!("Payment Verification:   strict_same_transaction (enforced)");
+                                println!(
+                                    "Verified Tickets:       {}",
+                                    row.summary.current_ticket_count
+                                );
+                            }
                             if row.winners.is_empty() {
                                 println!("Winners:                none");
                             } else {

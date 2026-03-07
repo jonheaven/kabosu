@@ -244,23 +244,80 @@ pub async fn index_block(
             }
         }
 
-        // Early cutoff filter for deploys discovered in this same block.
-        let cutoff_filtered_lotto_mints: Vec<ParsedLottoMint> = lotto_mints
-            .into_iter()
-            .filter(|parsed| {
-                lotto_deploy_map
-                    .get(&parsed.mint.lotto_id)
-                    .map(|deploy| block_height <= deploy.deploy.cutoff_block)
-                    .unwrap_or(true)
-            })
-            .collect();
+        // Validate each mint against deploy + same-tx payment before DB insertion.
+        let mut verified_lotto_mints: Vec<ParsedLottoMint> = Vec::new();
+        for parsed in lotto_mints.into_iter() {
+            let deploy = if let Some(local) = lotto_deploy_map.get(&parsed.mint.lotto_id) {
+                Some(local.deploy.clone())
+            } else {
+                match doginals_pg::get_lotto_deploy_by_id(&parsed.mint.lotto_id, &ord_tx).await {
+                    Ok(value) => value,
+                    Err(e) => {
+                        try_warn!(
+                            ctx,
+                            "Rejected doge-lotto mint {} ({}): unable to load deploy: {}",
+                            parsed.inscription_id,
+                            parsed.mint.lotto_id,
+                            e
+                        );
+                        continue;
+                    }
+                }
+            };
 
-        let inserted_lotto_tickets = if !cutoff_filtered_lotto_mints.is_empty() {
+            let Some(deploy) = deploy else {
+                try_warn!(
+                    ctx,
+                    "Rejected doge-lotto mint {} ({}): deploy not found",
+                    parsed.inscription_id,
+                    parsed.mint.lotto_id
+                );
+                continue;
+            };
+
+            if block_height > deploy.cutoff_block {
+                try_warn!(
+                    ctx,
+                    "Rejected doge-lotto mint {} ({}): mint height {} exceeds cutoff {}",
+                    parsed.inscription_id,
+                    parsed.mint.lotto_id,
+                    block_height,
+                    deploy.cutoff_block
+                );
+                continue;
+            }
+
+            if !crate::core::meta_protocols::lotto::validate_mint_against_deploy(&parsed.mint, &deploy) {
+                try_warn!(
+                    ctx,
+                    "Rejected doge-lotto mint {} ({}): seed numbers invalid for deploy config",
+                    parsed.inscription_id,
+                    parsed.mint.lotto_id
+                );
+                continue;
+            }
+
+            let (payment_ok, reason) = doginals_pg::verify_lotto_payment(&parsed, &deploy);
+            if !payment_ok {
+                try_warn!(
+                    ctx,
+                    "Rejected doge-lotto mint {} ({}): {}",
+                    parsed.inscription_id,
+                    parsed.mint.lotto_id,
+                    reason
+                );
+                continue;
+            }
+
+            verified_lotto_mints.push(parsed);
+        }
+
+        let inserted_lotto_tickets = if !verified_lotto_mints.is_empty() {
             // Ticket insertion re-validates the mint against the stored deploy and
             // checks the prize-pool payment on this same transaction's outputs,
             // and enforces persisted deploy cutoff_block.
             match doginals_pg::insert_lotto_tickets(
-                &cutoff_filtered_lotto_mints,
+                &verified_lotto_mints,
                 block_height,
                 block.timestamp,
                 &ord_tx,

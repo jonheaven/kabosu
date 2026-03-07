@@ -1485,11 +1485,8 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
             continue;
         }
 
-        if !tx_outputs_match_prize_payment(
-            &parsed.outputs,
-            &lottery.prize_pool_address,
-            lottery.ticket_price_koinu,
-        ) {
+        let (payment_ok, _reason) = verify_lotto_payment(parsed, &deploy);
+        if !payment_ok {
             continue;
         }
 
@@ -1528,6 +1525,15 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
     }
 
     Ok(inserted)
+}
+
+pub async fn get_lotto_deploy_by_id<T: GenericClient>(
+    lotto_id: &str,
+    client: &T,
+) -> Result<Option<LottoDeploy>, String> {
+    Ok(get_stored_lotto(lotto_id, client)
+        .await?
+        .map(|lotto| lotto.as_deploy()))
 }
 
 pub async fn resolve_lotto<T: GenericClient>(
@@ -2176,20 +2182,19 @@ fn bonus_score_for_ticket(
     }
 }
 
-fn tx_outputs_match_prize_payment(
-    outputs: &[crate::core::protocol::inscription_parsing::ParsedLottoOutput],
-    prize_pool_address: &str,
-    ticket_price_koinu: u64,
-) -> bool {
+pub fn verify_lotto_payment(
+    tx: &crate::core::protocol::inscription_parsing::ParsedLottoMint,
+    deploy: &LottoDeploy,
+) -> (bool, String) {
     // Atomic lotto mints are valid only when this same transaction pays the
-    // deploy's prize pool exactly `ticket_price_koinu`. Free lottos therefore
-    // require an exact zero total to the prize pool output set.
-    let paid_total = outputs
+    // deploy's prize pool exactly `ticket_price_koinu`.
+    let paid_total = tx
+        .outputs
         .iter()
         .filter_map(|output| {
             let script = script_buf_from_hex(&output.script_pubkey)?;
             let address = dogecoin_address_from_script(&script)?;
-            if address == prize_pool_address {
+            if address == deploy.prize_pool_address {
                 Some(output.value)
             } else {
                 None
@@ -2197,7 +2202,17 @@ fn tx_outputs_match_prize_payment(
         })
         .sum::<u64>();
 
-    paid_total == ticket_price_koinu
+    if paid_total != deploy.ticket_price_koinu {
+        return (
+            false,
+            format!(
+                "payment mismatch in tx {}: expected {} koinu to {}, found {}",
+                tx.tx_id, deploy.ticket_price_koinu, deploy.prize_pool_address, paid_total
+            ),
+        );
+    }
+
+    (true, "payment verified".to_string())
 }
 
 fn script_buf_from_hex(script_pubkey: &str) -> Option<ScriptBuf> {
