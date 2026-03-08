@@ -126,14 +126,15 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             
                             let web_addr = format!("0.0.0.0:{}", web_config.port).parse()
                                 .map_err(|e| format!("Invalid web server address: {}", e))?;
-                            
+                            let burn_address = config.protocols.lotto.burn_address.clone();
+
                             tokio::spawn(async move {
                                 if let Err(e) = crate::web::start_web_server(
                                     web_addr,
                                     doginals_pool,
                                     drc20_pool,
                                     dunes_pool,
-                                    config.protocols.lotto.burn_address.clone(),
+                                    burn_address,
                                 ).await {
                                     eprintln!("Web server error: {}", e);
                                 }
