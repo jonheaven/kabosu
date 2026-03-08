@@ -28,7 +28,7 @@ Both projects are completely independent codebases. doghook does not import dog.
 | DNS (Dogecoin Name System) | Full — 28 namespaces, first-wins, reorg-safe | `doghook dns resolve`, `doghook dns list` |
 | Dogemap (block claims) | Full — first-wins, reorg-safe | `doghook dogemap status`, `doghook dogemap list` |
 | doge-lotto | Full — deploys, atomic ticket mints, auto-resolution, Burners mechanic | `doghook lotto deploy`, `doghook lotto mint`, `doghook lotto list`, `doghook lotto status`, `doghook lotto burn`, `doghook lotto burners` |
-| Dogetag (on-chain graffiti) | Full — OP_RETURN text messages, reorg-safe, live viewer | `doghook dogetag list`, `doghook dogetag search`, `doghook dogetag address` |
+| Dogetag (on-chain graffiti) | Full — OP_RETURN text messages, reorg-safe | `doghook dogetag list`, `doghook dogetag search`, `doghook dogetag address`, `doghook dogetag send` |
 
 ### doge-lotto
 
@@ -179,6 +179,9 @@ doghook dogemap list --config-path doghook.toml --limit 50
 
 # JSON output
 doghook dogemap status 1000000 --config-path doghook.toml --json
+```
+
+Dogemap is its own inscription metaprotocol and is indexed independently of DNS, Dogetag, DRC-20, and doge-lotto.
 
 ### Dogetag — On-chain Graffiti
 
@@ -210,6 +213,15 @@ doghook dogetag search "satoshi" --json --config-path doghook.toml
 doghook dogetag address DYourAddressHere --config-path doghook.toml
 ```
 
+**Send DOGE + burn a message in the same tx:**
+```bash
+doghook dogetag send \
+  --to DRecipientAddressHere \
+  --amount 5.0 \
+  --message "such graffiti very chain wow" \
+  --config-path doghook.toml
+```
+
 **Webhook event payload:**
 ```json
 {
@@ -222,11 +234,11 @@ doghook dogetag address DYourAddressHere --config-path doghook.toml
 }
 ```
 
-The web explorer includes a live **Dogetags** tab with inline search and a clickable TxID link to the block explorer. Auto-refreshes every 5 seconds.
+Dogetag indexing tracks OP_RETURN UTF-8 graffiti messages from standard Dogecoin transactions and exposes them through CLI queries, web APIs, and webhooks.
 
 ## Web Explorer
 
-**Doghook includes a built-in web explorer** with a dark Doge-themed interface for viewing indexed data in real-time.
+Doghook includes a lightweight built-in explorer + JSON API server.
 
 ### Quick Start
 
@@ -246,17 +258,22 @@ doghook doginals service start --config-path doghook.toml
 
 3. Open your browser to **http://localhost:8080**
 
-### Features
+### Available routes
 
-- **📜 Inscriptions** — Latest Doginals with content type, size, block height
-- **🎰 Doge-Lotto** — Active lotteries, recent tickets (with tip %), winners, payouts
-- **💰 DRC-20** — Token deployments, mints, balances
-- **⚡ Dunes** — Dunes tokens and statistics
-- **🌐 DNS** — Registered .doge names and other namespaces
-- **🗺️ Dogemap** — Claimed blocks
-- **🔥 Burners** — Burn Points leaderboard and Burners Bonus Draw entries
+- `GET /health`
+- `GET /api/status`
+- `GET /api/inscriptions`
+- `GET /api/inscriptions/recent`
+- `GET /api/drc20/tokens`
+- `GET /api/dunes/tokens`
+- `GET /api/lotto/tickets`
+- `GET /api/lotto/winners`
+- `GET /api/dns/names`
+- `GET /api/dogemap/claims`
+- `GET /api/dogetags`
+- HTML pages: `/`, `/inscriptions`, `/drc20`, `/dunes`, `/lotto`
 
-All tabs auto-refresh every 5 seconds. Dark Kabosu green theme. Much wow.
+The bundled HTML currently focuses on lotto flows (tickets, QR, burn actions).
 
 ### Production Deployment
 
@@ -293,7 +310,6 @@ The web explorer also exposes JSON APIs:
 - `GET /health` — Health check
 
 All APIs return JSON. Use these to build custom dashboards or integrations.
-```
 
 ## Quick Start
 
