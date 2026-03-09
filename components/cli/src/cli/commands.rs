@@ -234,6 +234,22 @@ pub struct LottoDeployCommand {
     /// Resolution mode: always_winner | closest_wins | exact_only_with_rollover
     #[clap(long)]
     pub resolution_mode: String,
+    /// Optional template override (closest_wins, always_winner, custom, ...).
+    /// Defaults to closest_wins unless preset type implies custom.
+    #[clap(long)]
+    pub template: Option<String>,
+    /// Main drum pick count (defaults by lotto type).
+    #[clap(long)]
+    pub main_pick: Option<u16>,
+    /// Main drum max number (defaults by lotto type).
+    #[clap(long)]
+    pub main_max: Option<u16>,
+    /// Bonus drum pick count (0 disables; defaults by lotto type).
+    #[clap(long)]
+    pub bonus_pick: Option<u16>,
+    /// Bonus drum max number (0 disables; defaults by lotto type).
+    #[clap(long)]
+    pub bonus_max: Option<u16>,
     /// Enable rollover when the resolution mode allows it
     #[clap(long)]
     pub rollover_enabled: bool,
@@ -253,10 +269,10 @@ pub struct LottoMintCommand {
     /// Optional ticket id. Defaults to a generated id.
     #[clap(long)]
     pub ticket_id: Option<String>,
-    /// Generate 69 random unique numbers in [1, 420]
+    /// Generate random unique numbers matching the deploy main drum config
     #[clap(long)]
     pub quickpick: bool,
-    /// Comma-separated seed numbers. Must contain exactly 69 unique numbers in [1, 420].
+    /// Comma-separated seed numbers. Must match deploy main drum pick/max constraints.
     #[clap(long)]
     pub seed_numbers: Option<String>,
     /// Optional immutable protocol developer tip percentage (0-10).
