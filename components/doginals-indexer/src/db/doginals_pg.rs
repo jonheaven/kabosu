@@ -1,31 +1,33 @@
 use std::collections::{BTreeMap, HashMap};
 
 use bitcoin::ScriptBuf;
+use deadpool_postgres::GenericClient;
 use dogecoin::types::{
-    DogecoinBlockData, BlockIdentifier, OrdinalInscriptionNumber, OrdinalOperation,
+    BlockIdentifier, DogecoinBlockData, OrdinalInscriptionNumber, OrdinalOperation,
     TransactionIdentifier,
 };
-use deadpool_postgres::GenericClient;
 use postgres::{
     types::{PgBigIntU32, PgNumericU64},
     utils,
 };
 use refinery::embed_migrations;
+use sha2::{Digest, Sha256};
 use tokio_postgres::{types::ToSql, Client};
 
 use super::models::{
-    DbCurrentLocation, DbInscription, DbInscriptionParent, DbInscriptionRecursion, DbLocation,
-    DbKoinu,
-};
-use crate::core::protocol::{
-    inscription_parsing::{ParsedLottoDeploy, ParsedLottoMint},
-    koinu_numbering::TraversalResult, koinu_tracking::WatchedSatpoint,
+    DbCurrentLocation, DbInscription, DbInscriptionParent, DbInscriptionRecursion, DbKoinu,
+    DbLocation,
 };
 use crate::core::meta_protocols::lotto::{
     classic_prize_bps, compute_ticket_fingerprint, count_classic_matches,
     derive_classic_drawn_numbers, derive_classic_numbers, derive_draw_for_deploy, score_ticket,
     u256_abs_diff, validate_mint_against_deploy, LottoDeploy, LottoDraw, LottoTemplate,
     NumberConfig, ResolutionMode, FINGERPRINT_TIER_BPS,
+};
+use crate::core::protocol::{
+    inscription_parsing::{ParsedLottoDeploy, ParsedLottoMint},
+    koinu_numbering::TraversalResult,
+    koinu_tracking::WatchedSatpoint,
 };
 
 embed_migrations!("../../migrations/doginals");
@@ -501,10 +503,7 @@ async fn insert_locations<T: GenericClient>(
     Ok(())
 }
 
-async fn insert_koinus<T: GenericClient>(
-    satoshis: &[DbKoinu],
-    client: &T,
-) -> Result<(), String> {
+async fn insert_koinus<T: GenericClient>(satoshis: &[DbKoinu], client: &T) -> Result<(), String> {
     if satoshis.is_empty() {
         return Ok(());
     }
@@ -1115,7 +1114,12 @@ pub async fn insert_dns_names<T: GenericClient>(
                 "INSERT INTO dns_names (name, inscription_id, block_height, block_timestamp)
                  VALUES ($1, $2, $3, $4)
                  ON CONFLICT (name) DO NOTHING",
-                &[name, inscription_id, &(block_height as i64), &(block_timestamp as i64)],
+                &[
+                    name,
+                    inscription_id,
+                    &(block_height as i64),
+                    &(block_timestamp as i64),
+                ],
             )
             .await
             .map_err(|e| format!("insert_dns_names: {e}"))?;
@@ -1237,18 +1241,16 @@ pub async fn list_dns_names<T: GenericClient>(
                 .await
                 .map_err(|e| format!("list_dns_names (namespace): {e}"))?
         }
-        None => {
-            client
-                .query(
-                    "SELECT name, inscription_id, block_height, block_timestamp
+        None => client
+            .query(
+                "SELECT name, inscription_id, block_height, block_timestamp
                      FROM dns_names
                      ORDER BY block_height ASC
                      LIMIT $1 OFFSET $2",
-                    &[&(limit as i64), &(offset as i64)],
-                )
-                .await
-                .map_err(|e| format!("list_dns_names: {e}"))?
-        }
+                &[&(limit as i64), &(offset as i64)],
+            )
+            .await
+            .map_err(|e| format!("list_dns_names: {e}"))?,
     };
     Ok(rows
         .into_iter()
@@ -1431,7 +1433,9 @@ pub async fn insert_lotto_lotteries<T: GenericClient>(
         if parsed.deploy.draw_block <= deploy_height {
             continue;
         }
-        if special_lotto_requires_zero_fee(&parsed.deploy.lotto_id) && parsed.deploy.fee_percent != 0 {
+        if special_lotto_requires_zero_fee(&parsed.deploy.lotto_id)
+            && parsed.deploy.fee_percent != 0
+        {
             continue;
         }
 
@@ -1605,7 +1609,8 @@ pub async fn resolve_lotto<T: GenericClient>(
     let mut resolved_winners = Vec::new();
     for row in rows {
         let lottery = stored_lotto_from_row(&row)?;
-        let tickets = get_lotto_tickets_for_resolution(&lottery.lotto_id, lottery.draw_block, client).await?;
+        let tickets =
+            get_lotto_tickets_for_resolution(&lottery.lotto_id, lottery.draw_block, client).await?;
         let draw = derive_draw_for_deploy(resolved_block_hash, &lottery.as_deploy());
         let verified_ticket_count = tickets.len() as u64;
         let verified_sales_koinu = verified_ticket_count.saturating_mul(lottery.ticket_price_koinu);
@@ -1619,6 +1624,7 @@ pub async fn resolve_lotto<T: GenericClient>(
             &lottery,
             &tickets,
             &draw,
+            resolved_block_hash,
             resolved_height,
             net_prize_koinu,
             resolved_block_hash,
@@ -2088,7 +2094,9 @@ fn stored_lotto_from_row(row: &tokio_postgres::Row) -> Result<StoredLottoRow, St
             pick: row.get::<_, i32>("bonus_numbers_pick") as u16,
             max: row.get::<_, i32>("bonus_numbers_max") as u16,
         },
-        resolution_mode: resolution_mode_from_str(row.get::<_, String>("resolution_mode").as_str())?,
+        resolution_mode: resolution_mode_from_str(
+            row.get::<_, String>("resolution_mode").as_str(),
+        )?,
         rollover_enabled: row.get("rollover_enabled"),
         guaranteed_min_prize_koinu: row
             .get::<_, Option<i64>>("guaranteed_min_prize_koinu")
@@ -2118,7 +2126,9 @@ fn lotto_summary_from_row(row: &tokio_postgres::Row) -> LottoSummaryRow {
             .get::<_, Option<i64>>("guaranteed_min_prize_koinu")
             .map(|value| value as u64),
         resolved: row.get("resolved"),
-        resolved_height: row.get::<_, Option<i64>>("resolved_height").map(|value| value as u64),
+        resolved_height: row
+            .get::<_, Option<i64>>("resolved_height")
+            .map(|value| value as u64),
         drawn_numbers: row
             .get::<_, Option<Vec<i32>>>("drawn_numbers")
             .map(|numbers| i32_seed_numbers_to_u16(numbers).unwrap_or_default()),
@@ -2142,6 +2152,7 @@ fn resolve_lottery_winners(
     lottery: &StoredLottoRow,
     tickets: &[StoredTicketRow],
     draw: &LottoDraw,
+    resolved_block_hash: &str,
     resolved_height: u64,
     net_prize_koinu: u64,
     block_hash: &str,
@@ -2151,7 +2162,13 @@ fn resolve_lottery_winners(
             if tickets.is_empty() {
                 return (Vec::new(), false);
             }
-            let scored = score_tickets(tickets, draw, &lottery.template);
+            let scored = score_tickets(
+                tickets,
+                draw,
+                &lottery.template,
+                &lottery.lotto_id,
+                resolved_block_hash,
+            );
             let Some(best_score) = scored.first().map(|ticket| ticket.score) else {
                 return (Vec::new(), false);
             };
@@ -2163,22 +2180,26 @@ fn resolve_lottery_winners(
                 .unwrap_or(0);
             let winners: Vec<_> = scored
                 .into_iter()
-                .filter(|ticket| ticket.score == best_score && ticket.bonus_score == best_bonus_score)
+                .filter(|ticket| {
+                    ticket.score == best_score && ticket.bonus_score == best_bonus_score
+                })
                 .collect();
             let payouts = split_amount(net_prize_koinu, winners.len());
             (
                 winners
                     .into_iter()
                     .zip(payouts)
-                    .map(|(ticket, payout_koinu)| winner_from_scored_ticket(
-                        &lottery.lotto_id,
-                        resolved_height,
-                        1,
-                        10_000,
-                        payout_koinu,
-                        ticket,
-                        draw,
-                    ))
+                    .map(|(ticket, payout_koinu)| {
+                        winner_from_scored_ticket(
+                            &lottery.lotto_id,
+                            resolved_height,
+                            1,
+                            10_000,
+                            payout_koinu,
+                            ticket,
+                            draw,
+                        )
+                    })
                     .collect(),
                 false,
             )
@@ -2187,8 +2208,14 @@ fn resolve_lottery_winners(
             if tickets.is_empty() {
                 return (Vec::new(), false);
             }
-            let mut scored = score_tickets(tickets, draw, &lottery.template);
-            let mut payout_bps = payout_bps_for_template(&lottery.template);
+            let mut scored = score_tickets(
+                tickets,
+                draw,
+                &lottery.template,
+                &lottery.lotto_id,
+                resolved_block_hash,
+            );
+            let mut payout_bps = payout_bps_for_template(&lottery.template, &lottery.lotto_id);
             let winner_cap = payout_bps.len().max(1);
             scored.truncate(winner_cap);
             payout_bps.truncate(scored.len());
@@ -2219,10 +2246,16 @@ fn resolve_lottery_winners(
             )
         }
         ResolutionMode::ExactOnlyWithRollover => {
-            let exact_matches: Vec<_> = score_tickets(tickets, draw, &lottery.template)
-                .into_iter()
-                .filter(|ticket| ticket.seed_numbers == draw.main_numbers)
-                .collect();
+            let exact_matches: Vec<_> = score_tickets(
+                tickets,
+                draw,
+                &lottery.template,
+                &lottery.lotto_id,
+                resolved_block_hash,
+            )
+            .into_iter()
+            .filter(|ticket| ticket.seed_numbers == draw.main_numbers)
+            .collect();
             if exact_matches.is_empty() {
                 return (Vec::new(), lottery.rollover_enabled);
             }
@@ -2231,15 +2264,17 @@ fn resolve_lottery_winners(
                 exact_matches
                     .into_iter()
                     .zip(payouts)
-                    .map(|(ticket, payout_koinu)| winner_from_scored_ticket(
-                        &lottery.lotto_id,
-                        resolved_height,
-                        1,
-                        10_000,
-                        payout_koinu,
-                        ticket,
-                        draw,
-                    ))
+                    .map(|(ticket, payout_koinu)| {
+                        winner_from_scored_ticket(
+                            &lottery.lotto_id,
+                            resolved_height,
+                            1,
+                            10_000,
+                            payout_koinu,
+                            ticket,
+                            draw,
+                        )
+                    })
                     .collect(),
                 false,
             )
@@ -2438,6 +2473,8 @@ fn score_tickets(
     tickets: &[StoredTicketRow],
     draw: &LottoDraw,
     template: &LottoTemplate,
+    lotto_id: &str,
+    resolved_block_hash: &str,
 ) -> Vec<ScoredTicketRow> {
     let mut scored: Vec<_> = tickets
         .iter()
@@ -2445,8 +2482,8 @@ fn score_tickets(
             inscription_id: ticket.inscription_id.clone(),
             ticket_id: ticket.ticket_id.clone(),
             seed_numbers: ticket.seed_numbers.clone(),
-            score: score_ticket(&ticket.seed_numbers, &draw.main_numbers),
-            bonus_score: bonus_score_for_ticket(ticket, draw, template),
+            score: ticket_distance_score(ticket, draw, lotto_id, resolved_block_hash),
+            bonus_score: bonus_score_for_ticket(ticket, draw, template, lotto_id),
             minted_height: ticket.minted_height,
             tip_percent: ticket.tip_percent,
         })
@@ -2494,6 +2531,59 @@ fn winner_from_scored_ticket(
     }
 }
 
+fn ticket_distance_score(
+    ticket: &StoredTicketRow,
+    draw: &LottoDraw,
+    lotto_id: &str,
+    resolved_block_hash: &str,
+) -> u64 {
+    if lotto_id == "doge-4-20-blaze" {
+        return blaze_distance_score(&ticket.seed_numbers, resolved_block_hash);
+    }
+    score_ticket(&ticket.seed_numbers, &draw.main_numbers)
+}
+
+fn blaze_distance_score(seed_numbers: &[u16], resolved_block_hash: &str) -> u64 {
+    let mut sorted = seed_numbers.to_vec();
+    sorted.sort_unstable();
+    let fingerprint_input = sorted
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let fingerprint = Sha256::digest(fingerprint_input.as_bytes());
+    let target = hex::decode(resolved_block_hash.trim_start_matches("0x")).unwrap_or_default();
+    if target.len() != 32 {
+        return u64::MAX / 2;
+    }
+    let distance = abs_diff_be_32(&fingerprint.into(), &target.try_into().unwrap_or([0u8; 32]));
+    u64::from_be_bytes(distance[0..8].try_into().unwrap_or([0u8; 8]))
+}
+
+fn abs_diff_be_32(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    if left >= right {
+        sub_be_32(left, right)
+    } else {
+        sub_be_32(right, left)
+    }
+}
+
+fn sub_be_32(large: &[u8; 32], small: &[u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let mut borrow = 0i16;
+    for i in (0..32).rev() {
+        let mut value = large[i] as i16 - small[i] as i16 - borrow;
+        if value < 0 {
+            value += 256;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        out[i] = value as u8;
+    }
+    out
+}
+
 fn split_amount(amount: u64, recipients: usize) -> Vec<u64> {
     if recipients == 0 {
         return Vec::new();
@@ -2523,7 +2613,10 @@ fn split_by_bps(amount: u64, payout_bps: &[u32]) -> Vec<u64> {
     payouts
 }
 
-fn payout_bps_for_template(template: &LottoTemplate) -> Vec<u32> {
+fn payout_bps_for_template(template: &LottoTemplate, lotto_id: &str) -> Vec<u32> {
+    if lotto_id == "doge-4-20-blaze" {
+        return vec![6_500, 1_500, 1_000, 1_667, 1_666, 1_667];
+    }
     match template {
         LottoTemplate::ClosestWins => vec![6_000, 2_500, 1_500],
         LottoTemplate::Six49Classic => vec![7_000, 2_000, 1_000],
@@ -2543,6 +2636,7 @@ fn bonus_score_for_ticket(
     ticket: &StoredTicketRow,
     draw: &LottoDraw,
     template: &LottoTemplate,
+    lotto_id: &str,
 ) -> u64 {
     if draw.bonus_numbers.is_empty() {
         return 0;
@@ -2551,6 +2645,18 @@ fn bonus_score_for_ticket(
     match template {
         LottoTemplate::PowerballDualDrum | LottoTemplate::Custom => {
             score_ticket(&ticket.seed_numbers, &draw.bonus_numbers)
+        }
+        LottoTemplate::ClosestWins if lotto_id == "doge-4-20-blaze" => {
+            let matches = ticket
+                .seed_numbers
+                .iter()
+                .filter(|n| draw.bonus_numbers.contains(n))
+                .count() as u64;
+            match matches {
+                3 => 0,
+                2 => 1,
+                _ => 2,
+            }
         }
         _ => 0,
     }
@@ -2706,7 +2812,8 @@ fn i32_seed_numbers_to_u16(seed_numbers: Vec<i32>) -> Result<Vec<u16>, String> {
     seed_numbers
         .into_iter()
         .map(|number| {
-            u16::try_from(number).map_err(|_| format!("invalid lotto seed number stored in db: {number}"))
+            u16::try_from(number)
+                .map_err(|_| format!("invalid lotto seed number stored in db: {number}"))
         })
         .collect()
 }
@@ -2939,15 +3046,18 @@ pub async fn list_dogetags<T: GenericClient>(
         )
         .await
         .map_err(|e| format!("list_dogetags: {e}"))?;
-    Ok(rows.iter().map(|r| DogetagRow {
-        id: r.get(0),
-        txid: r.get(1),
-        block_height: r.get::<_, i64>(2) as u64,
-        block_timestamp: r.get::<_, i64>(3) as u64,
-        sender_address: r.get(4),
-        message: r.get(5),
-        message_bytes: r.get(6),
-    }).collect())
+    Ok(rows
+        .iter()
+        .map(|r| DogetagRow {
+            id: r.get(0),
+            txid: r.get(1),
+            block_height: r.get::<_, i64>(2) as u64,
+            block_timestamp: r.get::<_, i64>(3) as u64,
+            sender_address: r.get(4),
+            message: r.get(5),
+            message_bytes: r.get(6),
+        })
+        .collect())
 }
 
 pub async fn search_dogetags<T: GenericClient>(
@@ -2967,15 +3077,18 @@ pub async fn search_dogetags<T: GenericClient>(
         )
         .await
         .map_err(|e| format!("search_dogetags: {e}"))?;
-    Ok(rows.iter().map(|r| DogetagRow {
-        id: r.get(0),
-        txid: r.get(1),
-        block_height: r.get::<_, i64>(2) as u64,
-        block_timestamp: r.get::<_, i64>(3) as u64,
-        sender_address: r.get(4),
-        message: r.get(5),
-        message_bytes: r.get(6),
-    }).collect())
+    Ok(rows
+        .iter()
+        .map(|r| DogetagRow {
+            id: r.get(0),
+            txid: r.get(1),
+            block_height: r.get::<_, i64>(2) as u64,
+            block_timestamp: r.get::<_, i64>(3) as u64,
+            sender_address: r.get(4),
+            message: r.get(5),
+            message_bytes: r.get(6),
+        })
+        .collect())
 }
 
 pub async fn get_dogetags_by_address<T: GenericClient>(
@@ -2994,15 +3107,18 @@ pub async fn get_dogetags_by_address<T: GenericClient>(
         )
         .await
         .map_err(|e| format!("get_dogetags_by_address: {e}"))?;
-    Ok(rows.iter().map(|r| DogetagRow {
-        id: r.get(0),
-        txid: r.get(1),
-        block_height: r.get::<_, i64>(2) as u64,
-        block_timestamp: r.get::<_, i64>(3) as u64,
-        sender_address: r.get(4),
-        message: r.get(5),
-        message_bytes: r.get(6),
-    }).collect())
+    Ok(rows
+        .iter()
+        .map(|r| DogetagRow {
+            id: r.get(0),
+            txid: r.get(1),
+            block_height: r.get::<_, i64>(2) as u64,
+            block_timestamp: r.get::<_, i64>(3) as u64,
+            sender_address: r.get(4),
+            message: r.get(5),
+            message_bytes: r.get(6),
+        })
+        .collect())
 }
 
 pub async fn count_dogetags<T: GenericClient>(client: &T) -> Result<i64, String> {
@@ -3015,11 +3131,11 @@ pub async fn count_dogetags<T: GenericClient>(client: &T) -> Result<i64, String>
 
 #[cfg(test)]
 mod test {
+    use deadpool_postgres::GenericClient;
     use dogecoin::types::{
         OrdinalInscriptionNumber, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
         OrdinalInscriptionTransferDestination, OrdinalOperation,
     };
-    use deadpool_postgres::GenericClient;
     use postgres::{
         pg_begin, pg_pool_client,
         types::{PgBigIntU32, PgNumericU64},
@@ -3029,11 +3145,11 @@ mod test {
     use crate::{
         core::test_builders::{TestBlockBuilder, TestTransactionBuilder},
         db::{
-            models::{DbCurrentLocation, DbInscription, DbLocation, DbKoinu},
             doginals_pg::{
                 self, get_chain_tip_block_height, get_inscriptions_at_block, insert_block,
                 rollback_block,
             },
+            models::{DbCurrentLocation, DbInscription, DbKoinu, DbLocation},
             pg_reset_db, pg_test_connection, pg_test_connection_pool,
         },
     };

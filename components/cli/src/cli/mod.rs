@@ -9,7 +9,12 @@ use std::{
     time::Duration,
 };
 
-use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
+use clap::Parser;
+use commands::{
+    Command, ConfigCommand, DatabaseCommand, DnsCommand, DogemapCommand, DogetagCommand,
+    DogetagSendCommand, IndexCommand, LottoCommand, Protocol, ServiceCommand,
+};
+use config::{generator::generate_toml_config, Config};
 use dogecoin::bitcoincore_rpc::{
     bitcoin::{
         self, absolute::LockTime, hashes::Hash, Amount, OutPoint, ScriptBuf, Sequence, Transaction,
@@ -18,12 +23,7 @@ use dogecoin::bitcoincore_rpc::{
     json::SignRawTransactionInput,
     RpcApi,
 };
-use clap::Parser;
-use commands::{
-    Command, ConfigCommand, DatabaseCommand, DnsCommand, DogemapCommand,
-    DogetagCommand, DogetagSendCommand, IndexCommand, LottoCommand, Protocol, ServiceCommand,
-};
-use config::{generator::generate_toml_config, Config};
+use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
 use hiro_system_kit;
 use postgres::pg_pool;
 
@@ -104,7 +104,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     check_maintenance_mode(ctx);
                     let mut config = Config::from_file_path(&cmd.config_path)?;
                     config.assert_doginals_config()?;
-                    
+
                     // Start web explorer if enabled
                     let web_enabled = config.web.as_ref().map(|w| w.enabled).unwrap_or(false);
                     let web_port    = config.web.as_ref().map(|w| w.port).unwrap_or(8080);
@@ -151,14 +151,16 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                         });
                     }
 
-                    doginals_indexer::start_doginals_indexer(true, &abort_signal, &config, ctx).await?
+                    doginals_indexer::start_doginals_indexer(true, &abort_signal, &config, ctx)
+                        .await?
                 }
             },
             Command::Index(index_command) => match index_command {
                 IndexCommand::Sync(cmd) => {
                     let config = Config::from_file_path(&cmd.config_path)?;
                     config.assert_doginals_config()?;
-                    doginals_indexer::start_doginals_indexer(false, &abort_signal, &config, ctx).await?
+                    doginals_indexer::start_doginals_indexer(false, &abort_signal, &config, ctx)
+                        .await?
                 }
                 IndexCommand::Rollback(cmd) => {
                     let config = Config::from_file_path(&cmd.config_path)?;
@@ -281,7 +283,10 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     println!("{:<40} {:<70} {}", "Name", "Inscription ID", "Height");
                     println!("{}", "-".repeat(115));
                     for row in &rows {
-                        println!("{:<40} {:<70} {}", row.name, row.inscription_id, row.block_height);
+                        println!(
+                            "{:<40} {:<70} {}",
+                            row.name, row.inscription_id, row.block_height
+                        );
                     }
                 }
             }
@@ -322,8 +327,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             DogemapCommand::List(cmd) => {
                 let config = Config::from_file_path(&cmd.config_path)?;
                 config.assert_doginals_config()?;
-                let (rows, total) =
-                    doginals_indexer::dogemap_list(cmd.limit, 0, &config).await?;
+                let (rows, total) = doginals_indexer::dogemap_list(cmd.limit, 0, &config).await?;
                 if cmd.json {
                     let json_rows: Vec<_> = rows
                         .iter()
@@ -342,10 +346,16 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     );
                 } else {
                     println!("Dogemap Claims (Total: {total})");
-                    println!("{:<12} {:<70} {}", "Block", "Inscription ID", "Claim Height");
+                    println!(
+                        "{:<12} {:<70} {}",
+                        "Block", "Inscription ID", "Claim Height"
+                    );
                     println!("{}", "-".repeat(95));
                     for row in &rows {
-                        println!("{:<12} {:<70} {}", row.block_number, row.inscription_id, row.claim_height);
+                        println!(
+                            "{:<12} {:<70} {}",
+                            row.block_number, row.inscription_id, row.claim_height
+                        );
                     }
                 }
             }
@@ -368,18 +378,42 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 if !(0..=10).contains(&cmd.fee_percent) {
                     return Err("fee_percent must be between 0 and 10".into());
                 }
-                if matches!(cmd.lotto_id.as_str(), "doge-69-420" | "doge-max") && cmd.fee_percent != 0 {
-                    return Err(format!("{} must be deployed with fee_percent = 0", cmd.lotto_id));
+                if matches!(cmd.lotto_id.as_str(), "doge-69-420" | "doge-max")
+                    && cmd.fee_percent != 0
+                {
+                    return Err(format!(
+                        "{} must be deployed with fee_percent = 0",
+                        cmd.lotto_id
+                    ));
                 }
+
+                let defaults = lotto_number_defaults(&cmd.lotto_id);
+                let main_numbers = serde_json::json!({
+                    "pick": cmd.main_pick.unwrap_or(defaults.main_pick),
+                    "max": cmd.main_max.unwrap_or(defaults.main_max),
+                });
+                let bonus_numbers = serde_json::json!({
+                    "pick": cmd.bonus_pick.unwrap_or(defaults.bonus_pick),
+                    "max": cmd.bonus_max.unwrap_or(defaults.bonus_max),
+                });
+                let template = if let Some(template) = &cmd.template {
+                    normalize_template(template)?
+                } else {
+                    defaults.template
+                };
+
                 let payload = serde_json::json!({
                     "p": "doge-lotto",
                     "op": "deploy",
                     "lotto_id": cmd.lotto_id,
+                    "template": template,
                     "draw_block": cmd.draw_block,
                     "cutoff_block": cutoff_block,
                     "ticket_price_koinu": cmd.ticket_price_koinu,
                     "prize_pool_address": cmd.prize_pool_address,
                     "fee_percent": cmd.fee_percent,
+                    "main_numbers": main_numbers,
+                    "bonus_numbers": bonus_numbers,
                     "resolution_mode": resolution_mode,
                     "rollover_enabled": cmd.rollover_enabled,
                     "guaranteed_min_prize_koinu": cmd.guaranteed_min_prize_koinu,
@@ -403,16 +437,24 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 if !(0..=10).contains(&cmd.tip) {
                     return Err("tip must be between 0 and 10".into());
                 }
-                if cmd.tip > 0 && config.protocols.lotto.protocol_dev_address.trim().is_empty() {
+                if cmd.tip > 0
+                    && config
+                        .protocols
+                        .lotto
+                        .protocol_dev_address
+                        .trim()
+                        .is_empty()
+                {
                     return Err(
-                        "protocols.lotto.protocol_dev_address must be set when using --tip"
-                            .into(),
+                        "protocols.lotto.protocol_dev_address must be set when using --tip".into(),
                     );
                 }
-                let Some(status) = doginals_indexer::lotto_status(&cmd.lotto_id, &config).await? else {
+                let Some(status) = doginals_indexer::lotto_status(&cmd.lotto_id, &config).await?
+                else {
                     return Err(format!("Lotto not found: {}", cmd.lotto_id));
                 };
-                let chain_tip = dogecoin::utils::bitcoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
+                let chain_tip =
+                    dogecoin::utils::bitcoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
                 if chain_tip.index > status.summary.cutoff_block {
                     return Err(format!(
                         "ticket sales closed for {} at block {} (current tip #{})",
@@ -423,25 +465,20 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 let seed_numbers = if let Some(seed_numbers) = &cmd.seed_numbers {
                     parse_seed_numbers_for_lotto(
                         seed_numbers,
-                        LOTTO_QUICKPICK_PICK,
-                        LOTTO_QUICKPICK_MAX,
+                        status.summary.main_numbers_pick,
+                        status.summary.main_numbers_max,
                     )?
                 } else if cmd.quickpick {
                     doginals_indexer::core::meta_protocols::lotto::quickpick_for_config(
                         &doginals_indexer::core::meta_protocols::lotto::NumberConfig {
-                            pick: LOTTO_QUICKPICK_PICK,
-                            max: LOTTO_QUICKPICK_MAX,
+                            pick: status.summary.main_numbers_pick,
+                            max: status.summary.main_numbers_max,
                         },
                     )
                 } else {
-                    return Err(
-                        "lotto mint requires either --quickpick or --seed-numbers".into(),
-                    );
+                    return Err("lotto mint requires either --quickpick or --seed-numbers".into());
                 };
-                let ticket_id = cmd
-                    .ticket_id
-                    .clone()
-                    .unwrap_or_else(generate_ticket_id);
+                let ticket_id = cmd.ticket_id.clone().unwrap_or_else(generate_ticket_id);
 
                 let payload = serde_json::json!({
                     "p": "doge-lotto",
@@ -486,8 +523,14 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     println!("Broadcast txid:         {}", result.txid);
                     println!("Inscription ID:         {}i0", result.txid);
                     println!("Ticket ID:              {}", ticket_id);
-                    println!("Payment Address:        {}", status.summary.prize_pool_address);
-                    println!("Ticket Price (koinu):   {}", status.summary.ticket_price_koinu);
+                    println!(
+                        "Payment Address:        {}",
+                        status.summary.prize_pool_address
+                    );
+                    println!(
+                        "Ticket Price (koinu):   {}",
+                        status.summary.ticket_price_koinu
+                    );
                     println!("Tip Percent:            {}", cmd.tip);
                     println!("Tip Amount (koinu):     {}", result.tip_koinu);
                     if cmd.tip > 0 {
@@ -503,29 +546,29 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             LottoCommand::Status(cmd) => {
                 let config = Config::from_file_path(&cmd.config_path)?;
                 config.assert_doginals_config()?;
-                let chain_tip = dogecoin::utils::bitcoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
+                let chain_tip =
+                    dogecoin::utils::bitcoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
                 match doginals_indexer::lotto_status(&cmd.lotto_id, &config).await? {
                     Some(row) => {
-                        let blocks_remaining = row
-                            .summary
-                            .cutoff_block
-                            .saturating_sub(chain_tip.index);
-                                                // Calculate days since draw for unclaimed prize policy (1 block ≈ 1 minute)
-                                                let days_since_draw = if let Some(resolved_height) = row.summary.resolved_height {
-                                                    let blocks_since = chain_tip.index.saturating_sub(resolved_height);
-                                                    blocks_since / 1440 // 1440 blocks per day
-                                                } else {
-                                                    0
-                                                };
-                                                let unclaimed_status = if row.summary.resolved {
-                                                    if days_since_draw >= 30 {
-                                                        "Development Fund (30+ days)"
-                                                    } else {
-                                                        "Claimable (Winners have 30 days)"
-                                                    }
-                                                } else {
-                                                    "Not Yet Drawn"
-                                                };
+                        let blocks_remaining =
+                            row.summary.cutoff_block.saturating_sub(chain_tip.index);
+                        // Calculate days since draw for unclaimed prize policy (1 block ≈ 1 minute)
+                        let days_since_draw =
+                            if let Some(resolved_height) = row.summary.resolved_height {
+                                let blocks_since = chain_tip.index.saturating_sub(resolved_height);
+                                blocks_since / 1440 // 1440 blocks per day
+                            } else {
+                                0
+                            };
+                        let unclaimed_status = if row.summary.resolved {
+                            if days_since_draw >= 30 {
+                                "Development Fund (30+ days)"
+                            } else {
+                                "Claimable (Winners have 30 days)"
+                            }
+                        } else {
+                            "Not Yet Drawn"
+                        };
                         if cmd.json {
                             let winners: Vec<_> = row
                                 .winners
@@ -593,38 +636,71 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             println!("Draw Block:             {}", row.summary.draw_block);
                             println!(
                                 "Tickets close at block {} (~{} minutes)",
-                                row.summary.cutoff_block,
-                                blocks_remaining
+                                row.summary.cutoff_block, blocks_remaining
                             );
                             println!("Ticket Price (koinu):   {}", row.summary.ticket_price_koinu);
                             println!("Prize Pool Address:     {}", row.summary.prize_pool_address);
                             println!("Fee Percent:            {}", row.summary.fee_percent);
                             println!("Resolution Mode:        {}", row.summary.resolution_mode);
                             println!("Rollover Enabled:       {}", row.summary.rollover_enabled);
-                            println!("Guaranteed Min Prize:   {}", row.summary.guaranteed_min_prize_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
-                            println!("Current Ticket Count:   {}", row.summary.current_ticket_count);
+                            println!(
+                                "Guaranteed Min Prize:   {}",
+                                row.summary
+                                    .guaranteed_min_prize_koinu
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "-".into())
+                            );
+                            println!(
+                                "Current Ticket Count:   {}",
+                                row.summary.current_ticket_count
+                            );
                             println!("Resolved:               {}", row.summary.resolved);
-                            println!("Resolved Height:        {}", row.summary.resolved_height.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
-                            println!("Verified Ticket Count:  {}", row.summary.verified_ticket_count.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
-                            println!("Verified Sales (koinu): {}", row.summary.verified_sales_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
-                            println!("Net Prize (koinu):      {}", row.summary.net_prize_koinu.map(|v| v.to_string()).unwrap_or_else(|| "-".into()));
-                                                        if row.summary.resolved {
-                                                            let prize_doge = row.summary.net_prize_koinu.unwrap_or(0) as f64 / 100_000_000.0;
-                                                            println!(
-                                                                "Unclaimed Prize Pool:   {:.8} DOGE ({}, {} days since draw)",
-                                                                prize_doge,
-                                                                unclaimed_status,
-                                                                days_since_draw
-                                                            );
-                                                            if days_since_draw >= 30 {
-                                                                println!("  → Protocol developers thank participants for supporting development!");
-                                                            } else {
-                                                                println!("  → Winners: claim within 30 days or prizes support protocol development");
-                                                            }
-                                                        }
+                            println!(
+                                "Resolved Height:        {}",
+                                row.summary
+                                    .resolved_height
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "-".into())
+                            );
+                            println!(
+                                "Verified Ticket Count:  {}",
+                                row.summary
+                                    .verified_ticket_count
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "-".into())
+                            );
+                            println!(
+                                "Verified Sales (koinu): {}",
+                                row.summary
+                                    .verified_sales_koinu
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "-".into())
+                            );
+                            println!(
+                                "Net Prize (koinu):      {}",
+                                row.summary
+                                    .net_prize_koinu
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "-".into())
+                            );
+                            if row.summary.resolved {
+                                let prize_doge =
+                                    row.summary.net_prize_koinu.unwrap_or(0) as f64 / 100_000_000.0;
+                                println!(
+                                    "Unclaimed Prize Pool:   {:.8} DOGE ({}, {} days since draw)",
+                                    prize_doge, unclaimed_status, days_since_draw
+                                );
+                                if days_since_draw >= 30 {
+                                    println!("  → Protocol developers thank participants for supporting development!");
+                                } else {
+                                    println!("  → Winners: claim within 30 days or prizes support protocol development");
+                                }
+                            }
                             println!("Rollover Occurred:      {}", row.summary.rollover_occurred);
                             if cmd.show_payment_verification {
-                                println!("Payment Verification:   strict_same_transaction (enforced)");
+                                println!(
+                                    "Payment Verification:   strict_same_transaction (enforced)"
+                                );
                                 println!(
                                     "Verified Tickets:       {}",
                                     row.summary.current_ticket_count
@@ -647,10 +723,10 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                                         winner.inscription_id
                                     );
                                 }
-                                                   if row.summary.resolved && days_since_draw < 30 {
-                                                       println!("  Winners must transfer their ticket inscription to claim prizes.");
-                                                       println!("  Unclaimed prizes after 30 days become protocol development funds.");
-                                                   }
+                                if row.summary.resolved && days_since_draw < 30 {
+                                    println!("  Winners must transfer their ticket inscription to claim prizes.");
+                                    println!("  Unclaimed prizes after 30 days become protocol development funds.");
+                                }
                             }
                         }
                     }
@@ -716,9 +792,11 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             LottoCommand::Burn(cmd) => {
                 let config = Config::from_file_path(&cmd.config_path)?;
                 config.assert_doginals_config()?;
-                
+
                 // Get ticket info from indexer
-                let ticket_info = doginals_indexer::lotto_get_ticket_info(&cmd.ticket_inscription_id, &config).await?;
+                let ticket_info =
+                    doginals_indexer::lotto_get_ticket_info(&cmd.ticket_inscription_id, &config)
+                        .await?;
                 if ticket_info.is_none() {
                     if cmd.json {
                         println!("{{\"error\": \"Ticket not found\"}}");
@@ -727,10 +805,10 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     }
                     process::exit(1);
                 }
-                
+
                 let ticket_info = ticket_info.unwrap();
                 let burn_address = &config.protocols.lotto.burn_address;
-                
+
                 // TODO: Build and broadcast a transfer transaction to burn_address
                 // For now, just show info
                 if cmd.json {
@@ -754,7 +832,10 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     println!("Burn Address:           {}", burn_address);
                     println!();
                     println!("To burn this ticket and earn 1 Burn Point:");
-                    println!("  Send inscription {} to {}", cmd.ticket_inscription_id, burn_address);
+                    println!(
+                        "  Send inscription {} to {}",
+                        cmd.ticket_inscription_id, burn_address
+                    );
                     println!("  (Use your Dogecoin wallet's inscription transfer feature)");
                     println!();
                     println!("Reward: +1 Burn Point");
@@ -764,7 +845,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             LottoCommand::Burners(cmd) => {
                 let config = Config::from_file_path(&cmd.config_path)?;
                 config.assert_doginals_config()?;
-                
+
                 if let Some(addr) = &cmd.address {
                     // Show burn points for specific address
                     let points = doginals_indexer::lotto_get_burn_points(addr, &config).await?;
@@ -789,7 +870,10 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             println!("Burn Points for {}", p.owner_address);
                             println!("─────────────────────────────────────────");
                             println!("Burn Points:            {}", p.burn_points);
-                            println!("Bonus Draw Entries:     {} (10 points per entry)", p.burn_points / 10);
+                            println!(
+                                "Bonus Draw Entries:     {} (10 points per entry)",
+                                p.burn_points / 10
+                            );
                             println!("Total Tickets Burned:   {}", p.total_tickets_burned);
                             if let Some(h) = p.last_burn_height {
                                 println!("Last Burn Block:        {}", h);
@@ -800,7 +884,8 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     }
                 } else {
                     // Show leaderboard
-                    let burners = doginals_indexer::lotto_get_top_burners(cmd.limit, &config).await?;
+                    let burners =
+                        doginals_indexer::lotto_get_top_burners(cmd.limit, &config).await?;
                     if cmd.json {
                         let json_rows: Vec<_> = burners
                             .iter()
@@ -815,7 +900,10 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             .collect();
                         println!("{}", serde_json::json!({ "burners": json_rows }));
                     } else {
-                        println!("Burners Leaderboard — Top {} (every 10 points = 1 Bonus Draw entry)", cmd.limit);
+                        println!(
+                            "Burners Leaderboard — Top {} (every 10 points = 1 Bonus Draw entry)",
+                            cmd.limit
+                        );
                         println!("{}", "─".repeat(90));
                         println!(
                             "{:<48} {:<12} {:<12} {}",
@@ -846,19 +934,25 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 }
                 let result = broadcast_dogetag_send(&config, cmd, amount_koinu, &ctx)?;
                 if cmd.json {
-                    println!("{}", serde_json::json!({
-                        "txid": result.txid.to_string(),
-                        "to": cmd.to,
-                        "amount_koinu": result.amount_koinu,
-                        "fee_koinu": result.fee_koinu,
-                        "change_koinu": result.change_koinu,
-                        "message": result.message,
-                    }));
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "txid": result.txid.to_string(),
+                            "to": cmd.to,
+                            "amount_koinu": result.amount_koinu,
+                            "fee_koinu": result.fee_koinu,
+                            "change_koinu": result.change_koinu,
+                            "message": result.message,
+                        })
+                    );
                 } else {
                     println!("Tagged send broadcast successfully!");
                     println!("  txid:    {}", result.txid);
                     println!("  to:      {}", cmd.to);
-                    println!("  amount:  {} DOGE ({} koinu)", cmd.amount, result.amount_koinu);
+                    println!(
+                        "  amount:  {} DOGE ({} koinu)",
+                        cmd.amount, result.amount_koinu
+                    );
                     println!("  message: \"{}\"", result.message);
                     println!("  fee:     {} koinu", result.fee_koinu);
                     if result.change_koinu > 0 {
@@ -876,7 +970,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 DogetagCommand::Send(_) => unreachable!(),
             };
             let config = Config::from_file_path(config_path)?;
-            let doginals_config = config.doginals.as_ref()
+            let doginals_config = config
+                .doginals
+                .as_ref()
                 .ok_or("doginals database not configured")?;
             let pool = pg_pool(&doginals_config.db)?;
             let client = pool.get().await.map_err(|e| format!("pg pool: {e}"))?;
@@ -885,21 +981,29 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 DogetagCommand::List(cmd) => {
                     let tags = doginals_pg::list_dogetags(cmd.limit, cmd.offset, &client).await?;
                     if cmd.json {
-                        let json: Vec<_> = tags.iter().map(|t| serde_json::json!({
-                            "id": t.id,
-                            "txid": t.txid,
-                            "block_height": t.block_height,
-                            "block_timestamp": t.block_timestamp,
-                            "sender_address": t.sender_address,
-                            "message": t.message,
-                            "message_bytes": t.message_bytes,
-                        })).collect();
+                        let json: Vec<_> = tags
+                            .iter()
+                            .map(|t| {
+                                serde_json::json!({
+                                    "id": t.id,
+                                    "txid": t.txid,
+                                    "block_height": t.block_height,
+                                    "block_timestamp": t.block_timestamp,
+                                    "sender_address": t.sender_address,
+                                    "message": t.message,
+                                    "message_bytes": t.message_bytes,
+                                })
+                            })
+                            .collect();
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     } else {
                         if tags.is_empty() {
                             println!("No dogetags indexed yet.");
                         } else {
-                            println!("{:<12} {:<66} {:<44} {}", "Block", "TxID", "Sender", "Message");
+                            println!(
+                                "{:<12} {:<66} {:<44} {}",
+                                "Block", "TxID", "Sender", "Message"
+                            );
                             println!("{}", "-".repeat(120));
                             for t in &tags {
                                 println!(
@@ -917,15 +1021,20 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 DogetagCommand::Search(cmd) => {
                     let tags = doginals_pg::search_dogetags(&cmd.query, cmd.limit, &client).await?;
                     if cmd.json {
-                        let json: Vec<_> = tags.iter().map(|t| serde_json::json!({
-                            "id": t.id,
-                            "txid": t.txid,
-                            "block_height": t.block_height,
-                            "block_timestamp": t.block_timestamp,
-                            "sender_address": t.sender_address,
-                            "message": t.message,
-                            "message_bytes": t.message_bytes,
-                        })).collect();
+                        let json: Vec<_> = tags
+                            .iter()
+                            .map(|t| {
+                                serde_json::json!({
+                                    "id": t.id,
+                                    "txid": t.txid,
+                                    "block_height": t.block_height,
+                                    "block_timestamp": t.block_timestamp,
+                                    "sender_address": t.sender_address,
+                                    "message": t.message,
+                                    "message_bytes": t.message_bytes,
+                                })
+                            })
+                            .collect();
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     } else {
                         if tags.is_empty() {
@@ -947,17 +1056,24 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 }
                 DogetagCommand::Send(_) => unreachable!(),
                 DogetagCommand::Address(cmd) => {
-                    let tags = doginals_pg::get_dogetags_by_address(&cmd.address, cmd.limit, &client).await?;
+                    let tags =
+                        doginals_pg::get_dogetags_by_address(&cmd.address, cmd.limit, &client)
+                            .await?;
                     if cmd.json {
-                        let json: Vec<_> = tags.iter().map(|t| serde_json::json!({
-                            "id": t.id,
-                            "txid": t.txid,
-                            "block_height": t.block_height,
-                            "block_timestamp": t.block_timestamp,
-                            "sender_address": t.sender_address,
-                            "message": t.message,
-                            "message_bytes": t.message_bytes,
-                        })).collect();
+                        let json: Vec<_> = tags
+                            .iter()
+                            .map(|t| {
+                                serde_json::json!({
+                                    "id": t.id,
+                                    "txid": t.txid,
+                                    "block_height": t.block_height,
+                                    "block_timestamp": t.block_timestamp,
+                                    "sender_address": t.sender_address,
+                                    "message": t.message,
+                                    "message_bytes": t.message_bytes,
+                                })
+                            })
+                            .collect();
                         println!("{}", serde_json::to_string_pretty(&json).unwrap());
                     } else {
                         if tags.is_empty() {
@@ -1113,6 +1229,49 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
     Ok(())
 }
 
+struct LottoNumberDefaults {
+    template: &'static str,
+    main_pick: u16,
+    main_max: u16,
+    bonus_pick: u16,
+    bonus_max: u16,
+}
+
+fn lotto_number_defaults(lotto_id: &str) -> LottoNumberDefaults {
+    match lotto_id {
+        "doge-4-20-blaze" => LottoNumberDefaults {
+            template: "closest_wins",
+            main_pick: 4,
+            main_max: 20,
+            bonus_pick: 3,
+            bonus_max: 20,
+        },
+        _ => LottoNumberDefaults {
+            template: "closest_wins",
+            main_pick: 69,
+            main_max: 420,
+            bonus_pick: 0,
+            bonus_max: 0,
+        },
+    }
+}
+
+fn normalize_template(value: &str) -> Result<&'static str, String> {
+    match value {
+        "closest_wins" => Ok("closest_wins"),
+        "powerball_dual_drum" => Ok("powerball_dual_drum"),
+        "6_49_classic" => Ok("6_49_classic"),
+        "rollover_jackpot" => Ok("rollover_jackpot"),
+        "always_winner" => Ok("always_winner"),
+        "life_annuity" => Ok("life_annuity"),
+        "custom" => Ok("custom"),
+        _ => Err(format!(
+            "invalid template: {} (expected closest_wins, powerball_dual_drum, 6_49_classic, rollover_jackpot, always_winner, life_annuity, or custom)",
+            value
+        )),
+    }
+}
+
 fn normalize_resolution_mode(value: &str) -> Result<&'static str, String> {
     match value {
         "always_winner" => Ok("always_winner"),
@@ -1192,9 +1351,6 @@ fn generate_ticket_id() -> String {
     format!("ticket-{}-{}", now.as_secs(), now.subsec_nanos())
 }
 
-const LOTTO_QUICKPICK_PICK: u16 = 69;
-const LOTTO_QUICKPICK_MAX: u16 = 420;
-
 struct AtomicLottoMintResult {
     txid: Txid,
     tip_koinu: u64,
@@ -1237,8 +1393,12 @@ fn broadcast_dogetag_send(
     let client = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, ctx);
     let recipient_script = parse_dogecoin_address(&cmd.to)?;
 
-    let push_bytes: &bitcoin::script::PushBytes = msg_bytes.try_into()
-        .map_err(|_| format!("message too long to encode as OP_RETURN push ({} bytes)", msg_bytes.len()))?;
+    let push_bytes: &bitcoin::script::PushBytes = msg_bytes.try_into().map_err(|_| {
+        format!(
+            "message too long to encode as OP_RETURN push ({} bytes)",
+            msg_bytes.len()
+        )
+    })?;
     let op_return_script = ScriptBuf::builder()
         .push_opcode(bitcoin::opcodes::all::OP_RETURN)
         .push_slice(push_bytes)
@@ -1248,9 +1408,8 @@ fn broadcast_dogetag_send(
     let required_koinu = amount_koinu.saturating_add(fee_koinu);
 
     let (funding_txid, funding_vout, funding_value, funding_script) =
-        select_lotto_utxo(&client, required_koinu, false).map_err(|e| {
-            e.replace("atomic lotto mint", "tagged send")
-        })?;
+        select_lotto_utxo(&client, required_koinu, false)
+            .map_err(|e| e.replace("atomic lotto mint", "tagged send"))?;
 
     let funding_koinu = funding_value.to_sat();
     let change_koinu = funding_koinu
@@ -1348,20 +1507,21 @@ fn broadcast_atomic_lotto_mint(
                 .into(),
         );
     }
-    let output_count = 1
-        + usize::from(ticket_price_koinu > 0)
-        + usize::from(extra_amount_koinu > 0);
-    let fee_koinu =
-        calc_lotto_fee(script_sig_size(&script_segments), output_count, DEFAULT_LOTTO_FEE_RATE);
+    let output_count =
+        1 + usize::from(ticket_price_koinu > 0) + usize::from(extra_amount_koinu > 0);
+    let fee_koinu = calc_lotto_fee(
+        script_sig_size(&script_segments),
+        output_count,
+        DEFAULT_LOTTO_FEE_RATE,
+    );
     let required_koinu = ticket_price_koinu
         .saturating_add(extra_amount_koinu)
         .saturating_add(fee_koinu);
-    let (funding_txid, funding_vout, funding_value, funding_script) =
-        select_lotto_utxo(
-            &client,
-            required_koinu,
-            ticket_price_koinu == 0 && extra_amount_koinu == 0,
-        )?;
+    let (funding_txid, funding_vout, funding_value, funding_script) = select_lotto_utxo(
+        &client,
+        required_koinu,
+        ticket_price_koinu == 0 && extra_amount_koinu == 0,
+    )?;
 
     let funding_koinu = funding_value.to_sat();
     let prize_pool_script = parse_dogecoin_address(prize_pool_address)?;
@@ -1506,11 +1666,7 @@ fn build_atomic_lotto_signed_tx(
                 txid: funding_txid,
                 vout: funding_vout,
             },
-            script_sig: ScriptBuf::from(build_script_sig(
-                script_segments,
-                sig_bytes,
-                pubkey_bytes,
-            )),
+            script_sig: ScriptBuf::from(build_script_sig(script_segments, sig_bytes, pubkey_bytes)),
             sequence: Sequence::MAX,
             witness: bitcoin::Witness::new(),
         }],
@@ -1660,7 +1816,9 @@ fn sign_lotto_template(
     let mut instructions = script_sig.instructions();
 
     let sig = match instructions.next() {
-        Some(Ok(bitcoin::script::Instruction::PushBytes(push_bytes))) => push_bytes.as_bytes().to_vec(),
+        Some(Ok(bitcoin::script::Instruction::PushBytes(push_bytes))) => {
+            push_bytes.as_bytes().to_vec()
+        }
         other => {
             return Err(format!(
                 "unexpected signature instruction in signed lotto mint input: {:?}",
@@ -1670,7 +1828,9 @@ fn sign_lotto_template(
     };
 
     let pubkey = match instructions.next() {
-        Some(Ok(bitcoin::script::Instruction::PushBytes(push_bytes))) => push_bytes.as_bytes().to_vec(),
+        Some(Ok(bitcoin::script::Instruction::PushBytes(push_bytes))) => {
+            push_bytes.as_bytes().to_vec()
+        }
         other => {
             return Err(format!(
                 "unexpected pubkey instruction in signed lotto mint input: {:?}",
@@ -1686,7 +1846,10 @@ fn parse_dogecoin_address(addr: &str) -> Result<ScriptBuf, String> {
     let decoded = bitcoin::base58::decode_check(addr)
         .map_err(|e| format!("invalid Dogecoin address '{}': {}", addr, e))?;
     if decoded.is_empty() {
-        return Err(format!("invalid Dogecoin address '{}': empty payload", addr));
+        return Err(format!(
+            "invalid Dogecoin address '{}': empty payload",
+            addr
+        ));
     }
 
     let version = decoded[0];
@@ -1702,9 +1865,9 @@ fn parse_dogecoin_address(addr: &str) -> Result<ScriptBuf, String> {
                 .map_err(|e| format!("invalid P2SH address '{}': {}", addr, e))?;
             Ok(ScriptBuf::new_p2sh(&hash))
         }
-        _ => Err(format!("unsupported Dogecoin address version '{}' for '{}'", version, addr)),
+        _ => Err(format!(
+            "unsupported Dogecoin address version '{}' for '{}'",
+            version, addr
+        )),
     }
 }
-
-
-
