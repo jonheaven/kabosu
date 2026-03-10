@@ -420,18 +420,75 @@ pub enum IndexCommand {
     /// Rollback index blocks
     #[clap(name = "rollback", bin_name = "drop")]
     Rollback(RollbackIndexCommand),
+    /// Scan a block range for inscriptions without writing to the database.
+    /// Outputs inscription data as JSONL (one JSON object per line) to stdout
+    /// or to a file if --out is specified.
+    #[clap(name = "scan", bin_name = "scan")]
+    Scan(ScanIndexCommand),
+    /// Refresh the shadow copy of Dogecoin Core's LevelDB block index used by
+    /// the direct .blk file reader. Run this once while Dogecoin Core is
+    /// running to populate the index copy; subsequent syncs will refresh it
+    /// automatically. Requires `dogecoin.dogecoin_data_dir` in the config.
+    #[clap(name = "refresh-blk-index", bin_name = "refresh-blk-index")]
+    RefreshBlkIndex(RefreshBlkIndexCommand),
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct SyncIndexCommand {
     #[clap(long = "config-path")]
     pub config_path: String,
+    /// Start syncing from this block height (overrides start_block in config).
+    #[clap(long, value_name = "HEIGHT")]
+    pub from: Option<u64>,
+    /// Stop syncing at this block height inclusive (overrides stop_block in config).
+    #[clap(long, value_name = "HEIGHT")]
+    pub to: Option<u64>,
+    /// Force file mode for a specific block range (e.g. 500000..500100).
+    /// Overrides data_source = "file", start_block, and stop_block.
+    /// Useful for debugging inscription parsing on a small range without a full sync.
+    #[clap(long = "test-blk-range", value_name = "START..END")]
+    pub test_blk_range: Option<String>,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+pub struct ScanIndexCommand {
+    #[clap(long = "config-path")]
+    pub config_path: String,
+    /// First block height to scan (inclusive).
+    #[clap(long, value_name = "HEIGHT")]
+    pub from: u64,
+    /// Last block height to scan (inclusive).
+    #[clap(long, value_name = "HEIGHT")]
+    pub to: u64,
+    /// Write JSONL output to this file instead of stdout.
+    #[clap(long, value_name = "PATH")]
+    pub out: Option<String>,
+    /// Output a single JSON array instead of JSONL (newline-delimited JSON).
+    #[clap(long)]
+    pub json: bool,
+    /// Only emit inscription_revealed events (skip transfers).
+    #[clap(long)]
+    pub reveals_only: bool,
+    /// Filter by content-type prefix (e.g. "image/", "text/plain").
+    #[clap(long, value_name = "PREFIX")]
+    pub content_type: Option<String>,
+    /// Shorthand predicate filter. Supported formats:
+    ///   mime:<prefix>   — filter by content-type prefix (e.g. mime:image/, mime:text/plain)
+    /// Overrides --content-type when both are given.
+    #[clap(long, value_name = "PREDICATE")]
+    pub predicate: Option<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct RollbackIndexCommand {
     /// Number of blocks to rollback from index tip
     pub blocks: u32,
+    #[clap(long = "config-path")]
+    pub config_path: String,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+pub struct RefreshBlkIndexCommand {
     #[clap(long = "config-path")]
     pub config_path: String,
 }

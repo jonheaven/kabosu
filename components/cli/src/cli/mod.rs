@@ -12,9 +12,10 @@ use std::{
 use clap::Parser;
 use commands::{
     Command, ConfigCommand, DatabaseCommand, DnsCommand, DogemapCommand, DogetagCommand,
-    DogetagSendCommand, IndexCommand, LottoCommand, Protocol, ServiceCommand,
+    DogetagSendCommand, IndexCommand, LottoCommand, Protocol, RefreshBlkIndexCommand,
+    ServiceCommand, ScanIndexCommand,
 };
-use config::{generator::generate_toml_config, Config};
+use config::{generator::generate_toml_config, Config, DogecoinDataSource};
 use dogecoin::bitcoincore_rpc::{
     bitcoin::{
         self, absolute::LockTime, hashes::Hash, Amount, OutPoint, ScriptBuf, Sequence, Transaction,
@@ -54,6 +55,105 @@ pub fn main() {
     }
 }
 
+fn run_refresh_blk_index(
+    cmd: &RefreshBlkIndexCommand,
+    ctx: &Context,
+) -> Result<(), String> {
+    use dogecoin::blk_reader::refresh_index_copy;
+
+    let config = Config::from_file_path(&cmd.config_path)?;
+    let data_dir = config.dogecoin.dogecoin_data_dir.ok_or_else(|| {
+        "dogecoin.dogecoin_data_dir is not set in the config file.\n\
+         Add dogecoin_data_dir = \"/path/to/.dogecoin\" under [dogecoin] to enable direct .blk reads."
+            .to_string()
+    })?;
+
+    let live_index = PathBuf::from(&data_dir).join("blocks").join("index");
+    if !live_index.exists() {
+        eprintln!("Block index not found at {}", live_index.display());
+        eprintln!("Is Dogecoin Core installed and has it completed the initial block download?");
+        return Err(format!("block index not found at {}", live_index.display()));
+    }
+
+    let copy_dir = PathBuf::from(&config.storage.working_dir).join("blk-index");
+
+    println!("Refreshing block index copy...");
+    println!("  Source: {}", live_index.display());
+    println!("  Dest:   {}", copy_dir.display());
+
+    try_info!(ctx, "Refreshing blk index: {} → {}", live_index.display(), copy_dir.display());
+    let (copied, skipped) = refresh_index_copy(&live_index, &copy_dir)?;
+
+    println!("Done: {copied} file(s) updated, {skipped} already up-to-date.");
+    println!("doghook will now use direct .blk reads on the next sync (5-20× faster).");
+    try_info!(
+        ctx,
+        "blk-index refresh: {copied} updated, {skipped} unchanged → {}",
+        copy_dir.display()
+    );
+    Ok(())
+}
+
+async fn run_doginals_scan(
+    cmd: ScanIndexCommand,
+    abort_signal: &Arc<AtomicBool>,
+    ctx: &Context,
+) -> Result<(), String> {
+    use doginals_indexer::{scan_doginals, ScanOptions};
+    use std::fs::File;
+    use std::io::{BufWriter, stdout};
+
+    let config = Config::from_file_path(&cmd.config_path)?;
+
+    if cmd.from > cmd.to {
+        return Err(format!("--from ({}) must be <= --to ({})", cmd.from, cmd.to));
+    }
+
+    // --predicate overrides --content-type when both are given.
+    let content_type_filter = if let Some(ref pred) = cmd.predicate {
+        if let Some(suffix) = pred.strip_prefix("mime:") {
+            Some(suffix.to_string())
+        } else {
+            return Err(format!(
+                "unsupported predicate '{}' — supported formats: mime:<prefix>",
+                pred
+            ));
+        }
+    } else {
+        cmd.content_type.clone()
+    };
+
+    let opts = ScanOptions {
+        reveals_only: cmd.reveals_only,
+        content_type_prefix: content_type_filter,
+    };
+
+    try_info!(
+        ctx,
+        "Scanning blocks {} to {} for inscriptions{}{}...",
+        cmd.from,
+        cmd.to,
+        cmd.reveals_only.then_some(" (reveals only)").unwrap_or(""),
+        cmd.content_type.as_deref().map(|p| format!(" [content-type: {p}]")).unwrap_or_default()
+    );
+
+    let count = if let Some(out_path) = &cmd.out {
+        let file = File::create(out_path)
+            .map_err(|e| format!("cannot create output file {out_path}: {e}"))?;
+        let writer = Arc::new(std::sync::Mutex::new(BufWriter::new(file)));
+        let n = scan_doginals(cmd.from, cmd.to, opts, writer, abort_signal, &config, ctx).await?;
+        try_info!(ctx, "Scan complete: {n} events written to {out_path}");
+        n
+    } else {
+        // Stream directly to stdout.
+        let writer = Arc::new(std::sync::Mutex::new(BufWriter::new(stdout())));
+        scan_doginals(cmd.from, cmd.to, opts, writer, abort_signal, &config, ctx).await?
+    };
+
+    eprintln!("Scan complete: {count} inscription event(s) in blocks {}..{}.", cmd.from, cmd.to);
+    Ok(())
+}
+
 fn check_maintenance_mode(ctx: &Context) {
     let maintenance_enabled = std::env::var("DOGHOOK_MAINTENANCE").unwrap_or("0".into());
     if maintenance_enabled.eq("1") {
@@ -81,6 +181,29 @@ fn confirm_rollback(
         return Err("Deletion aborted".to_string());
     }
     Ok(())
+}
+
+/// Parse a block range string like "500000..500100" into `(start, end)`.
+fn parse_blk_range(s: &str) -> Result<(u64, u64), String> {
+    let parts: Vec<&str> = s.splitn(2, "..").collect();
+    if parts.len() != 2 {
+        return Err(format!(
+            "--test-blk-range '{}': expected format START..END (e.g. 500000..500100)",
+            s
+        ));
+    }
+    let start = parts[0]
+        .parse::<u64>()
+        .map_err(|_| format!("--test-blk-range: invalid start block '{}'", parts[0]))?;
+    let end = parts[1]
+        .parse::<u64>()
+        .map_err(|_| format!("--test-blk-range: invalid end block '{}'", parts[1]))?;
+    if start > end {
+        return Err(format!(
+            "--test-blk-range: start ({start}) must be <= end ({end})"
+        ));
+    }
+    Ok((start, end))
 }
 
 async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
@@ -157,10 +280,31 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             },
             Command::Index(index_command) => match index_command {
                 IndexCommand::Sync(cmd) => {
-                    let config = Config::from_file_path(&cmd.config_path)?;
+                    let mut config = Config::from_file_path(&cmd.config_path)?;
                     config.assert_doginals_config()?;
+                    if let Some(from) = cmd.from {
+                        config.start_block = Some(from);
+                    }
+                    if let Some(to) = cmd.to {
+                        config.stop_block = Some(to);
+                    }
+                    if let Some(range_str) = &cmd.test_blk_range {
+                        let (start, end) = parse_blk_range(range_str)?;
+                        config.dogecoin.data_source = DogecoinDataSource::File;
+                        config.start_block = Some(start);
+                        config.stop_block = Some(end);
+                        try_info!(
+                            ctx,
+                            "--test-blk-range: forcing file mode, blocks {}..{}",
+                            start,
+                            end
+                        );
+                    }
                     doginals_indexer::start_doginals_indexer(false, &abort_signal, &config, ctx)
                         .await?
+                }
+                IndexCommand::Scan(cmd) => {
+                    run_doginals_scan(cmd, &abort_signal, ctx).await?;
                 }
                 IndexCommand::Rollback(cmd) => {
                     let config = Config::from_file_path(&cmd.config_path)?;
@@ -175,6 +319,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     )
                     .await?;
                     println!("{} blocks dropped", cmd.blocks);
+                }
+                IndexCommand::RefreshBlkIndex(cmd) => {
+                    run_refresh_blk_index(&cmd, ctx)?;
                 }
             },
             Command::Database(database_command) => match database_command {
@@ -196,9 +343,30 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
             },
             Command::Index(index_command) => match index_command {
                 IndexCommand::Sync(cmd) => {
-                    let config = Config::from_file_path(&cmd.config_path)?;
+                    let mut config = Config::from_file_path(&cmd.config_path)?;
                     config.assert_dunes_config()?;
+                    if let Some(from) = cmd.from {
+                        config.start_block = Some(from);
+                    }
+                    if let Some(to) = cmd.to {
+                        config.stop_block = Some(to);
+                    }
+                    if let Some(range_str) = &cmd.test_blk_range {
+                        let (start, end) = parse_blk_range(range_str)?;
+                        config.dogecoin.data_source = DogecoinDataSource::File;
+                        config.start_block = Some(start);
+                        config.stop_block = Some(end);
+                        try_info!(
+                            ctx,
+                            "--test-blk-range: forcing file mode, blocks {}..{}",
+                            start,
+                            end
+                        );
+                    }
                     dunes::start_dunes_indexer(false, &abort_signal, &config, ctx).await?
+                }
+                IndexCommand::Scan(_) => {
+                    return Err("scan is only available under `doginals index scan`".to_string());
                 }
                 IndexCommand::Rollback(cmd) => {
                     let config = Config::from_file_path(&cmd.config_path)?;
@@ -213,6 +381,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     )
                     .await?;
                     println!("{} blocks dropped", cmd.blocks);
+                }
+                IndexCommand::RefreshBlkIndex(cmd) => {
+                    run_refresh_blk_index(&cmd, ctx)?;
                 }
             },
             Command::Database(database_command) => match database_command {

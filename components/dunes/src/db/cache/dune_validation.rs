@@ -31,7 +31,7 @@ mod tests {
         Witness,
     };
     use dogecoin::utils::{bitcoind::dogecoin_get_client, Context};
-    use config::{DogecoinConfig, Config};
+    use config::{DogecoinConfig, DogecoinDataSource, Config};
     use doginals_parser::{Dune, SpacedDune};
 
     use super::*;
@@ -47,6 +47,8 @@ mod tests {
                 rpc_url: "http://localhost:8332".to_string(),
                 network: bitcoin::Network::Regtest,
                 zmq_url: "tcp://localhost:28332".to_string(),
+                dogecoin_data_dir: None,
+                data_source: DogecoinDataSource::Auto,
             }
         }
     }

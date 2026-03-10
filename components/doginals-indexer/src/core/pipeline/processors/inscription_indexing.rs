@@ -231,12 +231,81 @@ pub async fn index_block(
             return Err(format!("Failed to insert block: {}", e));
         }
 
+        // Emit explicit logs for every inscription reveal indexed in this block.
+        if reveals_count > 0 {
+            let reveal_rows = ord_tx
+                .query(
+                    "SELECT inscription_id, tx_id, number, content_type, COALESCE(address, '')
+                     FROM inscriptions
+                     WHERE block_height::bigint = $1
+                     ORDER BY number ASC",
+                    &[&(block_height as i64)],
+                )
+                .await
+                .map_err(|e| format!("Failed to query inscription reveals for logging: {}", e))?;
+
+            for row in reveal_rows {
+                let inscription_id: String = row.get(0);
+                let tx_id: String = row.get(1);
+                let number: i64 = row.get(2);
+                let content_type: String = row.get(3);
+                let address: String = row.get(4);
+                let owner = if address.is_empty() { "unknown" } else { address.as_str() };
+                try_info!(
+                    ctx,
+                    "Inscription reveal: #{} id={} tx={} owner={} content_type={}",
+                    number,
+                    inscription_id,
+                    tx_id,
+                    owner,
+                    content_type
+                );
+            }
+        }
+
+        // Emit explicit logs for every inscription transfer indexed in this block.
+        if transfers_count > 0 {
+            let transfer_rows = ord_tx
+                .query(
+                    "SELECT inscription_id, number, tx_index, block_transfer_index
+                     FROM inscription_transfers
+                     WHERE block_height::bigint = $1
+                     ORDER BY block_transfer_index ASC",
+                    &[&(block_height as i64)],
+                )
+                .await
+                .map_err(|e| format!("Failed to query inscription transfers for logging: {}", e))?;
+
+            for row in transfer_rows {
+                let inscription_id: String = row.get(0);
+                let number: i64 = row.get(1);
+                let tx_index: i64 = row.get(2);
+                let block_transfer_index: i32 = row.get(3);
+                try_info!(
+                    ctx,
+                    "Inscription transfer: #{} id={} tx_index={} transfer_index={}",
+                    number,
+                    inscription_id,
+                    tx_index,
+                    block_transfer_index
+                );
+            }
+        }
+
         // DNS — write name registrations detected in this block
         if !dns_map.is_empty() {
             if let Err(e) = doginals_pg::insert_dns_names(&dns_map, block_height, block.timestamp, &ord_tx).await {
                 return Err(format!("Failed to insert DNS names: {}", e));
             }
             try_info!(ctx, "Indexed {} DNS name(s) at block #{block_height}", dns_map.len());
+            for (name, inscription_id) in dns_map.iter().take(5) {
+                try_info!(
+                    ctx,
+                    "DNS claim: {} <- {}",
+                    name,
+                    inscription_id
+                );
+            }
             let webhook_urls = config.webhook_urls().to_vec();
             if !webhook_urls.is_empty() {
                 for (name, inscription_id) in &dns_map {
@@ -252,6 +321,14 @@ pub async fn index_block(
                 return Err(format!("Failed to insert Dogemap claims: {}", e));
             }
             try_info!(ctx, "Indexed {} Dogemap claim(s) at block #{block_height}", dogemap_map.len());
+            for (block_number, inscription_id) in dogemap_map.iter().take(5) {
+                try_info!(
+                    ctx,
+                    "Dogemap claim: block {} <- {}",
+                    block_number,
+                    inscription_id
+                );
+            }
             let webhook_urls = config.webhook_urls().to_vec();
             if !webhook_urls.is_empty() {
                 for (block_number, inscription_id) in &dogemap_map {
@@ -274,6 +351,17 @@ pub async fn index_block(
                 return Err(format!("Failed to insert dogetags: {}", e));
             }
             try_info!(ctx, "Indexed {} dogetag(s) at block #{block_height}", dogetag_list.len());
+            for (txid, sender, message, _) in dogetag_list.iter().take(5) {
+                let short_txid = if txid.len() > 16 { &txid[..16] } else { txid.as_str() };
+                let message_preview: String = message.chars().take(80).collect();
+                try_info!(
+                    ctx,
+                    "Dogetag: tx={} sender={} message=\"{}\"",
+                    short_txid,
+                    sender.as_deref().unwrap_or("unknown"),
+                    message_preview
+                );
+            }
             let webhook_urls = config.webhook_urls().to_vec();
             if !webhook_urls.is_empty() {
                 for (txid, sender, message, _) in &dogetag_list {
@@ -299,6 +387,18 @@ pub async fn index_block(
             .await
             {
                 return Err(format!("Failed to insert doge-lotto deploys: {}", e));
+            }
+
+            for (lotto_id, deploy) in &lotto_deploy_map {
+                try_info!(
+                    ctx,
+                    "doge-lotto deploy: id={} template={:?} draw_block={} cutoff_block={} ticket_price_koinu={}",
+                    lotto_id,
+                    deploy.deploy.template,
+                    deploy.deploy.draw_block,
+                    deploy.deploy.cutoff_block,
+                    deploy.deploy.ticket_price_koinu,
+                );
             }
         }
 
@@ -394,6 +494,18 @@ pub async fn index_block(
             Vec::new()
         };
 
+        for ticket in &inserted_lotto_tickets {
+            try_info!(
+                ctx,
+                "doge-lotto ticket: lotto_id={} ticket_id={} inscription_id={} tip_percent={} minted_height={}",
+                ticket.lotto_id,
+                ticket.ticket_id,
+                ticket.inscription_id,
+                ticket.tip_percent,
+                ticket.minted_height,
+            );
+        }
+
         let resolved_lotto_winners = doginals_pg::resolve_lotto(
             block_height,
             &block.block_identifier.hash,
@@ -402,6 +514,19 @@ pub async fn index_block(
         )
         .await
         .map_err(|e| format!("Failed to resolve doge-lotto draws: {}", e))?;
+
+        for winner in &resolved_lotto_winners {
+            try_info!(
+                ctx,
+                "doge-lotto winner: lotto_id={} ticket_id={} rank={} payout_koinu={} gross_koinu={} tip_deduction_koinu={}",
+                winner.lotto_id,
+                winner.ticket_id,
+                winner.rank,
+                winner.payout_koinu,
+                winner.gross_payout_koinu,
+                winner.tip_deduction_koinu,
+            );
+        }
 
         // Burners: Detect lotto ticket burns (transfers to burn address)
         let burn_events = detect_lotto_burns(
@@ -413,6 +538,15 @@ pub async fn index_block(
             ctx,
         )
         .await?;
+
+        for (inscription_id, owner_address) in &burn_events {
+            try_info!(
+                ctx,
+                "doge-lotto burn: inscription_id={} owner={} (+1 Burn Point)",
+                inscription_id,
+                owner_address,
+            );
+        }
 
         let webhook_urls = config.webhook_urls().to_vec();
         if !webhook_urls.is_empty() {

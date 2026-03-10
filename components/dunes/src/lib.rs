@@ -120,6 +120,8 @@ async fn new_runes_indexer_runloop(
         commands_tx,
         chain_tip: Some(chain_tip),
         thread_handle: Some(handle),
+        file_blocks_synced: 0,
+        rpc_blocks_synced: 0,
     })
 }
 
@@ -201,5 +203,16 @@ pub async fn start_dunes_indexer(
         config,
         ctx,
     )
-    .await
+    .await?;
+
+    if indexer.file_blocks_synced > 0 || indexer.rpc_blocks_synced > 0 {
+        try_info!(
+            ctx,
+            "Session summary: {} blocks via .blk file, {} blocks via RPC",
+            indexer.file_blocks_synced,
+            indexer.rpc_blocks_synced
+        );
+    }
+
+    Ok(())
 }

@@ -6,9 +6,10 @@ use std::{
 use bitcoin::Network;
 
 use crate::{
-    DogecoinConfig, Config, DoginalsPredicatesConfig, MetricsConfig, WebConfig, DoginalDrc20Config, DoginalConfig,
-    DoginalMetaProtocolsConfig, PgDatabaseConfig, ResourcesConfig, DunesConfig, StorageConfig,
-    ProtocolsConfig, DnsProtocolConfig, DogemapProtocolConfig, DogetagProtocolConfig, LottoProtocolConfig, WebhooksConfig,
+    DogecoinConfig, DogecoinDataSource, Config, DoginalsPredicatesConfig, MetricsConfig, WebConfig,
+    DoginalDrc20Config, DoginalConfig, DoginalMetaProtocolsConfig, PgDatabaseConfig, ResourcesConfig,
+    DunesConfig, StorageConfig, ProtocolsConfig, DnsProtocolConfig, DogemapProtocolConfig,
+    DogetagProtocolConfig, LottoProtocolConfig, WebhooksConfig,
     DEFAULT_DOGECOIN_RPC_THREADS, DEFAULT_DOGECOIN_RPC_TIMEOUT, DEFAULT_INDEXER_CHANNEL_CAPACITY,
     DEFAULT_LRU_CACHE_SIZE, DEFAULT_MEMORY_AVAILABLE, DEFAULT_ULIMIT, DEFAULT_WORKING_DIR,
 };
@@ -93,6 +94,11 @@ pub struct DogecoinConfigToml {
     pub rpc_username: Option<String>,
     pub rpc_password: Option<String>,
     pub zmq_url: String,
+    /// Optional path to Dogecoin Core data directory for direct .blk file reads.
+    pub dogecoin_data_dir: Option<String>,
+    /// Block ingestion strategy: "auto" | "file" | "rpc". Defaults to "auto".
+    /// Can also be set via DOGECOIN_DATA_SOURCE env var.
+    pub data_source: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -156,6 +162,7 @@ pub struct ConfigToml {
     pub metrics: Option<MetricsConfigToml>,
     pub web: Option<WebConfigToml>,
     pub start_block: Option<u64>,
+    pub stop_block: Option<u64>,
     pub protocols: Option<ProtocolsConfigToml>,
     pub webhooks: Option<WebhooksConfigToml>,
 }
@@ -285,6 +292,7 @@ impl ConfigToml {
             doginals: ordinals,
             dunes: runes,
             start_block: toml.start_block,
+            stop_block: toml.stop_block,
             resources: ResourcesConfig {
                 ulimit: toml.resources.ulimit.unwrap_or(DEFAULT_ULIMIT),
                 cpu_core_available: toml.resources.cpu_core_available.unwrap_or(num_cpus::get()),
@@ -315,6 +323,14 @@ impl ConfigToml {
                     .ok_or("dogecoin.rpc_password missing (set in doghook.toml or DOGE_RPC_PASSWORD env var)")?,
                 network: bitcoin_network,
                 zmq_url: toml.dogecoin.zmq_url,
+                dogecoin_data_dir: toml.dogecoin.dogecoin_data_dir
+                    .or_else(|| std::env::var("DOGECOIN_DATA_DIR").ok()),
+                data_source: toml.dogecoin.data_source
+                    .or_else(|| std::env::var("DOGECOIN_DATA_SOURCE").ok())
+                    .as_deref()
+                    .map(|s| s.parse::<DogecoinDataSource>())
+                    .transpose()?
+                    .unwrap_or_default(),
             },
             metrics,
             web,

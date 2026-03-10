@@ -458,6 +458,243 @@ Dogecoin produces 1-minute blocks and experiences more frequent reorgs than Bitc
 - On reorg detection: `rollback_block` removes inscription data, DNS registrations, Dogemap claims, and DRC-20 operations for each orphaned block — in a single Postgres transaction
 - Replay continues from the fork point
 
+## Webhook Payload Examples + Sample Receiver
+
+doghook fires real-time webhooks on every inscription event (reveals, transfers, DRC-20 ops, Dunes etching, etc.).
+Webhooks are atomic and reorg-safe — if a block is reorged, doghook rolls back and re-sends corrected events.
+
+### Example payloads (JSON)
+
+**Inscription Revealed**
+```json
+{
+  "event": "inscription_revealed",
+  "inscription_id": "abc123...i0",
+  "tx_id": "0x...",
+  "block_height": 4609723,
+  "block_hash": "0x...",
+  "content_type": "image/png",
+  "content": "89504e470d0a1a0a...",
+  "inscriber": "D...address",
+  "parents": ["..."],
+  "delegate": null,
+  "metaprotocol": "drc-20",
+  "timestamp": 1730000000
+}
+```
+
+**Inscription Transferred**
+```json
+{
+  "event": "inscription_transferred",
+  "inscription_id": "abc123...i0",
+  "from": "D...old",
+  "to": "D...new",
+  "block_height": 4609724
+}
+```
+
+**DRC-20 Mint / Transfer** (same shape for Dunes, DNS, Dogemap, etc.)
+```json
+{
+  "event": "drc20_mint",
+  "tick": "DOGE",
+  "amount": "1000",
+  "to": "D...address",
+  "block_height": 4609725
+}
+```
+
+### Sample webhook receiver (Node.js / Express)
+
+```javascript
+// webhook-receiver.js
+const express = require('express');
+const app = express();
+app.use(express.json());
+
+app.post('/webhook', (req, res) => {
+  const event = req.body;
+  console.log(`[${new Date().toISOString()}] ${event.event} at block ${event.block_height}`);
+
+  // Add your logic here (Discord, database, trading bot, etc.)
+  if (event.event === 'inscription_revealed' && event.content_type.startsWith('image/')) {
+    console.log('New image inscription! ID:', event.inscription_id);
+  }
+
+  res.sendStatus(200);
+});
+
+app.listen(3000, () => console.log('Webhook receiver running on port 3000'));
+```
+
+Add to `doghook.toml`:
+```toml
+[webhooks]
+urls = ["http://localhost:3000/webhook"]
+```
+
+---
+
+## Deployment Guide
+
+### 1. Docker (recommended for production)
+
+```dockerfile
+# Dockerfile
+FROM rust:1.80 as builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release --package cli
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/doghook /usr/local/bin/
+COPY doghook.toml /etc/doghook.toml
+CMD ["doghook", "doginals", "index", "--config-path", "/etc/doghook.toml"]
+```
+
+```bash
+docker build -t doghook .
+docker run -d \
+  -v /path/to/dogecoin-data:/root/.dogecoin \
+  -v /path/to/doghook.toml:/etc/doghook.toml \
+  -p 8080:8080 \
+  doghook
+```
+
+### 2. systemd service (bare-metal)
+
+```ini
+# /etc/systemd/system/doghook.service
+[Unit]
+Description=Doghook Dogecoin Doginals Indexer
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/doghook doginals index --config-path /etc/doghook.toml
+Restart=always
+User=youruser
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now doghook
+```
+
+### 3. Nginx reverse proxy
+
+```nginx
+server {
+    listen 80;
+    server_name doghook.yourdomain.com;
+
+    location / {
+        proxy_pass http://localhost:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /metrics {
+        proxy_pass http://localhost:8080/metrics;
+        allow 127.0.0.1;
+        deny all;
+    }
+}
+```
+
+---
+
+## API Endpoints Reference
+
+doghook ships with a lightweight explorer + REST API on the configured port (default `8080`).
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Web explorer UI |
+| GET | `/api/inscription/:id` | Single inscription details |
+| GET | `/api/block/:height` | Block summary + inscriptions |
+| GET | `/api/address/:addr` | All inscriptions owned by address |
+| GET | `/api/search?content_type=image/png` | Search by MIME, tick, etc. |
+| GET | `/metrics` | Prometheus metrics (file vs rpc counts) |
+| POST | `/webhook/test` | Test webhook delivery |
+
+All API responses are JSON and support `?limit=100&offset=200` pagination.
+
+---
+
+## Predicate Filter Cookbook
+
+The `--predicate` flag (and config) lets you index exactly what you care about.
+
+### Basic examples
+
+```bash
+--predicate "mime:image/"                    # Any image
+--predicate "mime:text/plain"                # Plain text only
+--predicate "content-prefix:abc123"          # Content starts with these bytes
+--predicate "inscriber:D...specificaddress"  # Only one inscriber
+```
+
+### Advanced combinations (AND/OR)
+
+```bash
+--predicate "mime:image/ OR mime:video/"
+--predicate "mime:text/plain AND content-prefix:hello"
+--predicate "metaprotocol:drc-20 AND tick:DOGE"
+```
+
+### Full list of supported filters
+
+- `mime:<prefix>` (alias: `content_type:`)
+- `content-prefix:<hexbytes>`
+- `inscriber:<address>`
+- `metaprotocol:drc-20` / `dunes` / `dogemap` etc.
+- `tick:<XXXX>` (for DRC-20 / Dunes)
+- `parent:<inscription_id>`
+
+> **Pro tip:** Test your predicate first with `scan` before enabling it on the full indexer!
+
+---
+
+## Complete Example doghook.toml
+
+```toml
+# doghook.toml — Full production example
+
+[dogecoin]
+data_dir = "C:\\Users\\jheav\\AppData\\Roaming\\Dogecoin"   # ← Change this
+data_source = "auto"          # "auto" (recommended), "file", or "rpc"
+stop_block = null             # Optional: cap any sync/scan
+
+[server]
+port = 8080
+prometheus = true
+
+[webhooks]
+urls = [
+    "http://localhost:3000/webhook",
+    "https://your-discord-webhook.com"
+]
+# Optional: only send certain events
+# events = ["inscription_revealed", "drc20_mint"]
+
+[doginals]
+# Optional: extra predicates for the full indexer
+predicates = [
+    "mime:image/",
+    "mime:text/plain"
+]
+
+[dunes]
+# Same predicates available for dunes
+```
+
+---
+
 ## Building
 
 ```bash

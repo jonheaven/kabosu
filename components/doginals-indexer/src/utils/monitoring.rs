@@ -53,6 +53,10 @@ pub struct PrometheusMonitoring {
     pub drc20_transfer_operations_total: UInt64Gauge,
     pub drc20_transfer_send_operations_total: UInt64Gauge,
 
+    // Block ingestion source counters
+    pub blocks_indexed_via_file: UInt64Gauge,
+    pub blocks_indexed_via_rpc: UInt64Gauge,
+
     // Registry
     pub registry: Registry,
 }
@@ -160,6 +164,18 @@ impl PrometheusMonitoring {
             "Count of BRC-20 transfer send operations processed per block",
         );
 
+        // Block ingestion source counters
+        let blocks_indexed_via_file = Self::create_and_register_uint64_gauge(
+            &registry,
+            "blocks_indexed_via_file",
+            "Total blocks indexed using direct .blk file reads (fast path).",
+        );
+        let blocks_indexed_via_rpc = Self::create_and_register_uint64_gauge(
+            &registry,
+            "blocks_indexed_via_rpc",
+            "Total blocks indexed using JSON-RPC.",
+        );
+
         // BRC-20 specific metrics in total
         let drc20_deploy_operations_total = Self::create_and_register_uint64_gauge(
             &registry,
@@ -183,6 +199,8 @@ impl PrometheusMonitoring {
         );
 
         PrometheusMonitoring {
+            blocks_indexed_via_file,
+            blocks_indexed_via_rpc,
             last_indexed_block_height,
             last_indexed_inscription_number,
             last_classic_indexed_blessed_inscription_number,
@@ -371,6 +389,14 @@ impl PrometheusMonitoring {
     pub fn metrics_record_drc20_transfer_send_per_block(&self, transfer_send_count: u64) {
         self.drc20_transfer_send_operations_per_block
             .set(transfer_send_count);
+    }
+
+    // Block ingestion source counters
+    pub fn metrics_add_file_blocks(&self, count: u64) {
+        self.blocks_indexed_via_file.add(count);
+    }
+    pub fn metrics_add_rpc_blocks(&self, count: u64) {
+        self.blocks_indexed_via_rpc.add(count);
     }
 
     // BRC-20 specific metrics methods in total

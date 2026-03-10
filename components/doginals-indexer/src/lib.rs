@@ -6,9 +6,14 @@ use core::{
         block_archiving::store_compacted_blocks,
         inscription_indexing::{process_blocks, rollback_block},
     },
-    protocol::sequence_cursor::SequenceCursor,
+    protocol::{
+        inscription_parsing::parse_inscriptions_in_standardized_block,
+        sequence_cursor::SequenceCursor,
+    },
 };
 use std::{
+    collections::HashMap,
+    io::Write,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -199,6 +204,8 @@ async fn new_ordinals_indexer_runloop(
         commands_tx,
         chain_tip,
         thread_handle: Some(handle),
+        file_blocks_synced: 0,
+        rpc_blocks_synced: 0,
     })
 }
 
@@ -400,5 +407,199 @@ pub async fn start_doginals_indexer(
         config,
         ctx,
     )
-    .await
+    .await?;
+
+    // Report how many blocks were synced via each path to Prometheus.
+    if indexer.file_blocks_synced > 0 {
+        prometheus.metrics_add_file_blocks(indexer.file_blocks_synced);
+        try_info!(
+            ctx,
+            "Session summary: {} blocks via .blk file, {} blocks via RPC",
+            indexer.file_blocks_synced,
+            indexer.rpc_blocks_synced
+        );
+    }
+    if indexer.rpc_blocks_synced > 0 {
+        prometheus.metrics_add_rpc_blocks(indexer.rpc_blocks_synced);
+    }
+
+    Ok(())
+}
+
+/// Options controlling what `scan_doginals` emits.
+pub struct ScanOptions {
+    /// Only emit `inscription_revealed` entries (skip transfers).
+    pub reveals_only: bool,
+    /// If set, only emit inscriptions whose content_type starts with this prefix.
+    pub content_type_prefix: Option<String>,
+}
+
+/// Scan a block range for inscriptions without writing anything to Postgres.
+///
+/// For each block in `from_block..=to_block` the function:
+/// 1. Fetches the block via the .blk pipeline (if available) or RPC.
+/// 2. Parses inscriptions using the same logic as the full indexer.
+/// 3. Writes one JSON object per inscription to `writer` (JSONL format).
+///
+/// Returns the number of inscriptions found.
+pub async fn scan_doginals<W: Write + Send + 'static>(
+    from_block: u64,
+    to_block: u64,
+    opts: ScanOptions,
+    writer: Arc<std::sync::Mutex<W>>,
+    abort_signal: &Arc<AtomicBool>,
+    config: &Config,
+    ctx: &Context,
+) -> Result<u64, String> {
+    use crossbeam_channel::bounded;
+    use dogecoin::{types::OrdinalOperation, IndexerCommand};
+
+    if from_block > to_block {
+        return Err(format!("--from ({from_block}) must be <= --to ({to_block})"));
+    }
+
+    // Build a scan config: same as the caller's config but with the exact range.
+    let mut scan_config = config.clone();
+    scan_config.start_block = Some(from_block);
+    scan_config.stop_block = Some(to_block);
+
+    // Counter shared between the handler thread and this function.
+    let found = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let found_moved = found.clone();
+
+    // Channel for blocks coming in from the dogecoin pipeline.
+    let (commands_tx, commands_rx) = bounded::<IndexerCommand>(
+        config.resources.indexer_channel_capacity,
+    );
+
+    let config_moved = config.clone();
+    let ctx_moved = ctx.clone();
+    let abort_signal_moved = abort_signal.clone();
+    let opts_reveals_only = opts.reveals_only;
+    let opts_content_type = opts.content_type_prefix.clone();
+    let writer_moved = writer.clone();
+
+    let handle: JoinHandle<()> = hiro_system_kit::thread_named("scan_handler")
+        .spawn(move || {
+            // future_block_on needs &Context; keep a clone for that reference while
+            // ctx_moved is captured by move into the async block.
+            let ctx_ref = ctx_moved.clone();
+            dogecoin::utils::future_block_on(&ctx_ref, async move {
+                loop {
+                    if abort_signal_moved.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match commands_rx.recv() {
+                        Ok(cmd) => match cmd {
+                            IndexerCommand::StoreCompactedBlocks(_) => {
+                                // Not needed for scan — skip.
+                            }
+                            IndexerCommand::IndexBlocks { mut apply_blocks, .. } => {
+                                for block in apply_blocks.iter_mut() {
+                                    let mut drc20_map = HashMap::new();
+                                    let mut dns_map = HashMap::new();
+                                    let mut dogemap_map = HashMap::new();
+                                    let mut lotto_deploy_map = HashMap::new();
+                                    let mut lotto_mints = vec![];
+                                    parse_inscriptions_in_standardized_block(
+                                        block,
+                                        &mut drc20_map,
+                                        &mut dns_map,
+                                        &mut dogemap_map,
+                                        &mut lotto_deploy_map,
+                                        &mut lotto_mints,
+                                        &config_moved,
+                                        &ctx_moved,
+                                    );
+                                    for tx in &block.transactions {
+                                        for op in &tx.metadata.ordinal_operations {
+                                            match op {
+                                                OrdinalOperation::InscriptionRevealed(reveal) => {
+                                                    if let Some(ref prefix) = opts_content_type {
+                                                        if !reveal.content_type.starts_with(prefix.as_str()) {
+                                                            continue;
+                                                        }
+                                                    }
+                                                    found_moved.fetch_add(1, Ordering::Relaxed);
+                                                    let line = serde_json::json!({
+                                                        "type": "inscription_revealed",
+                                                        "block_height": block.block_identifier.index,
+                                                        "block_hash": block.block_identifier.hash,
+                                                        "tx_id": tx.transaction_identifier.hash,
+                                                        "inscription_id": reveal.inscription_id,
+                                                        "content_type": reveal.content_type,
+                                                        "content_length": reveal.content_length,
+                                                        "content_bytes": reveal.content_bytes,
+                                                        "inscriber_address": reveal.inscriber_address,
+                                                        "curse_type": reveal.curse_type,
+                                                        "metaprotocol": reveal.metaprotocol,
+                                                        "metadata": reveal.metadata,
+                                                        "parents": reveal.parents,
+                                                        "delegate": reveal.delegate,
+                                                    });
+                                                    let mut w = writer_moved.lock().unwrap();
+                                                    let _ = writeln!(w, "{}", line);
+                                                }
+                                                OrdinalOperation::InscriptionTransferred(transfer) => {
+                                                    if opts_reveals_only {
+                                                        continue;
+                                                    }
+                                                    found_moved.fetch_add(1, Ordering::Relaxed);
+                                                    let line = serde_json::json!({
+                                                        "type": "inscription_transferred",
+                                                        "block_height": block.block_identifier.index,
+                                                        "block_hash": block.block_identifier.hash,
+                                                        "tx_id": tx.transaction_identifier.hash,
+                                                        "ordinal_number": transfer.ordinal_number,
+                                                        "destination": transfer.destination,
+                                                    });
+                                                    let mut w = writer_moved.lock().unwrap();
+                                                    let _ = writeln!(w, "{}", line);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            IndexerCommand::Terminate => break,
+                        },
+                        Err(_) => break,
+                    }
+                }
+                Ok::<(), String>(())
+            });
+        })
+        .expect("unable to spawn scan_handler thread");
+
+    // Determine which chain tip to report as our current index tip so the
+    // dogecoin pipeline knows where to start downloading from.
+    let chain_tip = if from_block == 0 {
+        None
+    } else {
+        Some(dogecoin::types::BlockIdentifier {
+            index: from_block - 1,
+            hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
+        })
+    };
+
+    let mut indexer = dogecoin::Indexer {
+        commands_tx,
+        chain_tip,
+        thread_handle: Some(handle),
+        file_blocks_synced: 0,
+        rpc_blocks_synced: 0,
+    };
+
+    start_dogecoin_indexer(
+        &mut indexer,
+        first_inscription_height(config),
+        false,
+        false,
+        abort_signal,
+        &scan_config,
+        ctx,
+    )
+    .await?;
+
+    Ok(found.load(Ordering::Relaxed))
 }

@@ -1,8 +1,55 @@
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf, str::FromStr};
 
 use bitcoin::Network;
 
 use crate::toml::ConfigToml;
+
+// ---------------------------------------------------------------------------
+// Data source selection
+// ---------------------------------------------------------------------------
+
+/// Controls how the indexer fetches historical Dogecoin blocks.
+///
+/// | Variant | Behaviour |
+/// |---------|-----------|
+/// | `Auto`  | Try direct `.blk` file reads first; fall back to RPC if the index cannot be opened. **Default.** |
+/// | `File`  | Require direct `.blk` file reads. Error on startup if the index cannot be opened. |
+/// | `Rpc`   | Always use JSON-RPC, even when `dogecoin_data_dir` is set. |
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum DogecoinDataSource {
+    /// Try `.blk` files, fall back to RPC automatically (default).
+    #[default]
+    Auto,
+    /// Force direct `.blk` file reads; fail if index unavailable.
+    File,
+    /// Always use JSON-RPC.
+    Rpc,
+}
+
+impl fmt::Display for DogecoinDataSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DogecoinDataSource::Auto => f.write_str("auto"),
+            DogecoinDataSource::File => f.write_str("file"),
+            DogecoinDataSource::Rpc => f.write_str("rpc"),
+        }
+    }
+}
+
+impl FromStr for DogecoinDataSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "auto" => Ok(DogecoinDataSource::Auto),
+            "file" | "blk" => Ok(DogecoinDataSource::File),
+            "rpc" => Ok(DogecoinDataSource::Rpc),
+            other => Err(format!(
+                "unknown data_source '{}'; expected one of: auto, file, rpc",
+                other
+            )),
+        }
+    }
+}
 
 pub const DEFAULT_WORKING_DIR: &str = "data";
 pub const DEFAULT_ULIMIT: usize = 2048;
@@ -27,6 +74,9 @@ pub struct Config {
     /// from this block instead of the built-in chain constant (4,600,000 on mainnet).
     /// Wipe `data/` and the Postgres databases before using this.
     pub start_block: Option<u64>,
+    /// When set, stop indexing after this block height. Used with `--test-blk-range`
+    /// to index a small range for debugging without syncing the full chain.
+    pub stop_block: Option<u64>,
 }
 
 /// Webhook delivery configuration.
@@ -131,6 +181,13 @@ pub struct DogecoinConfig {
     pub rpc_username: String,
     pub rpc_password: String,
     pub zmq_url: String,
+    /// Optional path to the Dogecoin Core data directory (e.g. ~/.dogecoin).
+    /// When set and `data_source` is `Auto` or `File`, doghook reads blocks
+    /// directly from `.blk` files for initial sync (5-20x faster than RPC).
+    pub dogecoin_data_dir: Option<String>,
+    /// Controls whether to use direct `.blk` file reads or JSON-RPC for
+    /// historical block ingestion. Defaults to `Auto`.
+    pub data_source: DogecoinDataSource,
 }
 
 /// A Postgres configuration for a single database.
@@ -211,6 +268,8 @@ impl Config {
                 rpc_password: "devnet".into(),
                 network: Network::Regtest,
                 zmq_url: "http://0.0.0.0:18543".into(),
+                dogecoin_data_dir: None,
+                data_source: DogecoinDataSource::Auto,
             },
             doginals: Some(DoginalConfig {
                 db: PgDatabaseConfig {
@@ -248,6 +307,7 @@ impl Config {
             protocols: ProtocolsConfig::default(),
             webhooks: WebhooksConfig::default(),
             start_block: None,
+            stop_block: None,
         }
     }
 

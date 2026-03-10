@@ -372,7 +372,7 @@ impl Iterator for TransactionBytesCursorIterator<'_> {
 mod tests {
     use super::*;
     use bitcoin::Network;
-    use config::config::DogecoinConfig;
+    use config::config::{DogecoinConfig, DogecoinDataSource};
 
     use crate::{
         pipeline::rpc::{parse_downloaded_block, standardize_dogecoin_block},
@@ -389,6 +389,8 @@ mod tests {
             rpc_username: "".to_string(),
             rpc_password: "".to_string(),
             zmq_url: "tcp://127.0.0.1:28332".to_string(),
+            dogecoin_data_dir: None,
+            data_source: DogecoinDataSource::Auto,
         };
         let block = include_str!("./fixtures/blocks_json/279671.json");
         let decoded_block =

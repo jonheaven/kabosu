@@ -28,6 +28,7 @@ use crate::{
 #[cfg(feature = "zeromq")]
 use crate::pipeline::zmq::start_zeromq_pipeline;
 
+pub mod blk;
 pub mod rpc;
 
 #[cfg(feature = "zeromq")]
