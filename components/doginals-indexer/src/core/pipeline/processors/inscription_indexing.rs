@@ -310,7 +310,7 @@ pub async fn index_block(
             if !webhook_urls.is_empty() {
                 for (name, inscription_id) in &dns_map {
                     let payload = webhooks::dns_event(name, inscription_id, block_height, block.timestamp);
-                    webhooks::fire_webhooks(&webhook_urls, config.webhooks.hmac_secret.as_deref(), payload, ctx).await;
+                    webhooks::fire_webhooks(webhook_urls.clone(), config.webhooks.hmac_secret.clone(), payload);
                 }
             }
         }
@@ -333,7 +333,7 @@ pub async fn index_block(
             if !webhook_urls.is_empty() {
                 for (block_number, inscription_id) in &dogemap_map {
                     let payload = webhooks::dogemap_event(*block_number, inscription_id, block_height, block.timestamp);
-                    webhooks::fire_webhooks(&webhook_urls, config.webhooks.hmac_secret.as_deref(), payload, ctx).await;
+                    webhooks::fire_webhooks(webhook_urls.clone(), config.webhooks.hmac_secret.clone(), payload);
                 }
             }
         }
@@ -372,7 +372,7 @@ pub async fn index_block(
                         block_height,
                         block.timestamp,
                     );
-                    webhooks::fire_webhooks(&webhook_urls, config.webhooks.hmac_secret.as_deref(), payload, ctx).await;
+                    webhooks::fire_webhooks(webhook_urls.clone(), config.webhooks.hmac_secret.clone(), payload);
                 }
             }
         }
@@ -561,7 +561,7 @@ pub async fn index_block(
                     &ticket.seed_numbers,
                     ticket.tip_percent,
                 );
-                webhooks::fire_webhooks(&webhook_urls, config.webhooks.hmac_secret.as_deref(), payload, ctx).await;
+                webhooks::fire_webhooks(webhook_urls.clone(), config.webhooks.hmac_secret.clone(), payload);
             }
             for winner in &resolved_lotto_winners {
                 let payload = webhooks::lotto_winner_event(
@@ -579,7 +579,7 @@ pub async fn index_block(
                     &winner.seed_numbers,
                     &winner.drawn_numbers,
                 );
-                webhooks::fire_webhooks(&webhook_urls, config.webhooks.hmac_secret.as_deref(), payload, ctx).await;
+                webhooks::fire_webhooks(webhook_urls.clone(), config.webhooks.hmac_secret.clone(), payload);
             }
         }
 

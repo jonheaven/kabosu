@@ -1,4 +1,3 @@
-use dogecoin::{try_warn, utils::Context};
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde_json::Value;
@@ -6,72 +5,59 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// POST `payload` to every URL in `urls`, with exponential-backoff retries and optional
-/// HMAC-SHA256 request signing.
+/// Spawn a background task to deliver `payload` to all `urls` with HMAC signing and
+/// exponential-backoff retries. Returns immediately — never blocks the indexer.
 ///
 /// If `hmac_secret` is `Some`, each request includes:
 ///   `X-Doghook-Signature: sha256=<hex(HMAC-SHA256(secret, body))>`
-/// Receivers can verify authenticity with the same secret.
 ///
-/// Delivery failures are logged as warnings — they never block indexing.
-/// Each URL is delivered serially with up to 5 attempts (waits: 2 s, 4 s, 8 s, 16 s, 32 s).
-pub async fn fire_webhooks(
-    urls: &[String],
-    hmac_secret: Option<&str>,
-    payload: Value,
-    ctx: &Context,
-) {
+/// Attempts: up to 5, with delays of 2 s / 4 s / 8 s / 16 s / 32 s.
+/// Delivery failures are printed to stderr — they never block indexing.
+pub fn fire_webhooks(urls: Vec<String>, hmac_secret: Option<String>, payload: Value) {
     if urls.is_empty() {
         return;
     }
-    let client = Client::new();
-    let body = payload.to_string();
+    tokio::spawn(async move {
+        let client = Client::new();
+        let body = payload.to_string();
 
-    let sig = hmac_secret.map(|secret| {
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-            .expect("HMAC accepts keys of any length");
-        mac.update(body.as_bytes());
-        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
-    });
+        let sig = hmac_secret.as_deref().map(|secret| {
+            let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+                .expect("HMAC accepts keys of any length");
+            mac.update(body.as_bytes());
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        });
 
-    for url in urls {
-        let mut attempts: u32 = 0;
-        loop {
-            let mut builder = client
-                .post(url)
-                .header("Content-Type", "application/json")
-                .body(body.clone());
-            if let Some(ref s) = sig {
-                builder = builder.header("X-Doghook-Signature", s);
-            }
-            match builder.send().await {
-                Ok(resp) if resp.status().is_success() => break,
-                Ok(resp) => {
-                    if attempts >= 4 {
-                        try_warn!(
-                            ctx,
-                            "Webhook {url} gave up after {} retries (last status: {})",
-                            attempts,
-                            resp.status()
-                        );
-                        break;
+        for url in &urls {
+            let mut attempts: u32 = 0;
+            loop {
+                let mut builder = client
+                    .post(url)
+                    .header("Content-Type", "application/json")
+                    .body(body.clone());
+                if let Some(ref s) = sig {
+                    builder = builder.header("X-Doghook-Signature", s);
+                }
+                match builder.send().await {
+                    Ok(r) if r.status().is_success() => break,
+                    Ok(r) => {
+                        if attempts >= 4 {
+                            eprintln!("[doghook] webhook {url} gave up after {attempts} retries (status {})", r.status());
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        if attempts >= 4 {
+                            eprintln!("[doghook] webhook {url} gave up after {attempts} retries: {e}");
+                            break;
+                        }
                     }
                 }
-                Err(e) => {
-                    if attempts >= 4 {
-                        try_warn!(
-                            ctx,
-                            "Webhook {url} gave up after {} retries: {e}",
-                            attempts
-                        );
-                        break;
-                    }
-                }
+                attempts += 1;
+                tokio::time::sleep(tokio::time::Duration::from_secs(2u64.pow(attempts))).await;
             }
-            attempts += 1;
-            tokio::time::sleep(tokio::time::Duration::from_secs(2u64.pow(attempts))).await;
         }
-    }
+    });
 }
 
 /// Build a DNS registration event payload.
