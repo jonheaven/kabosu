@@ -1,5 +1,5 @@
 /**
- * Doghook Browser Wallet Integration
+ * Kabosu Browser Wallet Integration
  *
  * Supports: MyDoge (window.doge), Dojak (window.dojak), Nintondo (window.nintondo)
  * and a basic Browser Wallet (WIF key stored in localStorage).
@@ -13,9 +13,9 @@
 // ---------------------------------------------------------------------------
 
 const WALLET_TYPES = { MYDOGE: 'mydoge', DOJAK: 'dojak', NINTONDO: 'nintondo', BROWSER: 'browser' };
-const LS_KEY_TYPE    = 'doghook_wallet_type';
-const LS_KEY_ADDR    = 'doghook_wallet_address';
-const LS_KEY_BROWSER = 'doghook_browser_wallet';
+const LS_KEY_TYPE    = 'kabosu_wallet_type';
+const LS_KEY_ADDR    = 'kabosu_wallet_address';
+const LS_KEY_BROWSER = 'kabosu_browser_wallet';
 
 // Dogecoin mainnet params
 const DOGE_NETWORK_PARAMS = {
@@ -525,9 +525,9 @@ class WalletUI {
     async connectWallet(type) {
         try {
             const address = await this.manager.connect(type);
-            doghookToast(`Connected: ${address.slice(0, 8)}…${address.slice(-6)}`);
+            kabosuToast(`Connected: ${address.slice(0, 8)}…${address.slice(-6)}`);
         } catch (e) {
-            doghookToast(`Connection failed: ${e.message}`, 'error');
+            kabosuToast(`Connection failed: ${e.message}`, 'error');
         }
     }
 
@@ -535,11 +535,11 @@ class WalletUI {
         const address = document.getElementById('bw-address').value.trim();
         const wif     = document.getElementById('bw-wif').value.trim();
         if (!address.startsWith('D') || address.length < 26) {
-            doghookToast('Enter a valid Dogecoin address (starts with D)', 'error');
+            kabosuToast('Enter a valid Dogecoin address (starts with D)', 'error');
             return;
         }
         if (!wif) {
-            doghookToast('Enter your WIF private key', 'error');
+            kabosuToast('Enter your WIF private key', 'error');
             return;
         }
         this.manager.adapters[WALLET_TYPES.BROWSER].importWIF(wif, address);
@@ -583,10 +583,10 @@ class WalletUI {
 }
 
 // ---------------------------------------------------------------------------
-// Global helper — re-uses the doghookToast function from index.html if present
+// Global helper — re-uses the kabosuToast function from index.html if present
 // ---------------------------------------------------------------------------
 
-function doghookToast(msg, type = 'success') {
+function kabosuToast(msg, type = 'success') {
     if (typeof window.showToast === 'function') {
         window.showToast(msg, type === 'error' ? 'error' : 'success');
         return;
@@ -612,3 +612,4 @@ window.walletManager = walletManager;
 window.walletUI      = walletUI;
 
 document.addEventListener('DOMContentLoaded', () => walletUI.mount());
+

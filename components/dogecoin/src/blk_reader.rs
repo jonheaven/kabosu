@@ -12,18 +12,18 @@
 //! ## Index shadow copy
 //!
 //! Dogecoin Core holds an exclusive LevelDB lock on `blocks/index/` while
-//! running. To work around this, doghook maintains a **shadow copy** of the
+//! running. To work around this, kabosu maintains a **shadow copy** of the
 //! index at `<data-dir>/blk-index/`. The copy is refreshed automatically
 //! each time the indexer starts. A smart-copy strategy is used: immutable
 //! `.ldb` files are skipped once they already exist; only the MANIFEST and
 //! WAL are re-copied on each run (usually < 1 second). The `LOCK` file is
-//! never copied so doghook can open the shadow copy freely.
+//! never copied so kabosu can open the shadow copy freely.
 //!
 //! ## Prevout values
 //!
 //! The binary fast path sets `previous_output.value = 0` and
 //! `previous_output.block_height = 0` on all inputs because prevout data is
-//! not encoded in the `.blk` files. This is acceptable for doghook's primary
+//! not encoded in the `.blk` files. This is acceptable for kabosu's primary
 //! use case (inscription content indexing) because:
 //!   - `operations` (Rosetta model) is left empty and is unused by the indexer
 //!   - Fee calculation is skipped (fee = 0)
@@ -69,7 +69,7 @@ impl BlkReader {
     /// Attempt to open a `BlkReader`.
     ///
     /// `blocks_dir` is the `blocks/` directory inside the Dogecoin Core data
-    /// directory. `index_copy_dir` is where doghook stores its shadow copy of
+    /// directory. `index_copy_dir` is where kabosu stores its shadow copy of
     /// Core's LevelDB index (e.g. `<data-dir>/blk-index`).
     ///
     /// Returns `Ok(None)` when the index cannot be opened, in which case the
@@ -136,7 +136,7 @@ impl BlkReader {
                         ctx,
                         "BlkReader: Dogecoin Core holds the LevelDB lock and the shadow copy \
                          could not be created. Falling back to RPC. Run \
-                         `doghook doginals index refresh-blk-index` once to build the shadow copy.",
+                         `kabosu doginals index refresh-blk-index` once to build the shadow copy.",
                     );
                 } else {
                     try_warn!(ctx, "BlkReader: could not read block index: {e}");
@@ -654,3 +654,4 @@ pub fn read_block_by_height(
         .map_err(|e| format!("height {height}: {e}"))?;
     Ok(Some(block))
 }
+

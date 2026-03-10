@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
-/// doghook — Dogecoin Doginals / DNS / Dogemap / Dunes indexer
+/// kabosu — Dogecoin Doginals / DNS / Dogemap / Dunes indexer
 #[derive(Parser, Debug)]
-#[clap(name = "doghook", author, version, about, long_about = None)]
+#[clap(name = "kabosu", author, version, about, long_about = None)]
 pub enum Protocol {
     /// Doginals index commands
     #[clap(subcommand)]
@@ -520,3 +520,4 @@ pub struct DecodeCommand {
     #[clap(long = "config-path")]
     pub config_path: String,
 }
+

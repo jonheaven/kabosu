@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Doghook Explorer</title>
+  <title>Kabosu Explorer</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     body { font-family: sans-serif; margin: 1rem 2rem; }
@@ -14,7 +14,7 @@
   </style>
 </head>
 <body>
-  <h1>Doghook Explorer — Lotto</h1>
+  <h1>Kabosu Explorer — Lotto</h1>
   <div style="margin-bottom:.75rem; display:flex; gap:.5rem; align-items:center;">
     <label for="walletAddress">Wallet Address:</label>
     <input id="walletAddress" placeholder="D..." style="min-width:360px;" />
@@ -81,7 +81,7 @@
       }
       if (!confirm(`Burn ticket ${ticket.ticket_id}? This will prepare wallet send to ${state.burnAddress}.`)) return;
 
-      const uri = `dogecoin:${state.burnAddress}?amount=0.00001&label=Doghook%20Burn&message=${encodeURIComponent(`burn ticket ${ticket.inscription_id}`)}`;
+      const uri = `dogecoin:${state.burnAddress}?amount=0.00001&label=Kabosu%20Burn&message=${encodeURIComponent(`burn ticket ${ticket.inscription_id}`)}`;
       window.location.href = uri;
       setTimeout(refreshLotto, 5000);
     }
@@ -152,3 +152,4 @@
   </script>
 </body>
 </html>
+

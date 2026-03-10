@@ -18,7 +18,7 @@ pub const MAX_DOGETAG_BYTES: usize = 80;
 /// `script_hex` is the raw hex of the output script (without a `0x` prefix).
 /// Returns `Some(message)` for valid dogetags, `None` otherwise.
 pub fn try_parse_dogetag(script_hex: &str) -> Option<String> {
-    // Strip optional "0x" prefix that doghook uses for script fields.
+    // Strip optional "0x" prefix that kabosu uses for script fields.
     let hex = script_hex.strip_prefix("0x").unwrap_or(script_hex);
 
     // Must start with OP_RETURN (6a).
@@ -72,3 +72,4 @@ pub fn try_parse_dogetag(script_hex: &str) -> Option<String> {
 
     Some(message.to_string())
 }
+

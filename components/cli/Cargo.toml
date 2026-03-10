@@ -4,7 +4,7 @@ version.workspace = true
 edition = "2021"
 
 [[bin]]
-name = "doghook"
+name = "kabosu"
 path = "src/main.rs"
 
 [lib]
@@ -50,3 +50,4 @@ cli = ["clap", "clap_generate", "toml", "hiro-system-kit/log"]
 debug = ["hiro-system-kit/debug"]
 release = ["hiro-system-kit/release"]
 tcmalloc = ["tcmalloc2"]
+

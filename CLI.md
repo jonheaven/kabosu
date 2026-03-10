@@ -1,30 +1,30 @@
 # Full CLI Reference
 
-All commands live under `doghook doginals` or `doghook dunes`.
+All commands live under `kabosu doginals` or `kabosu dunes`.
 The two namespaces are identical in syntax and flags — just swap `doginals` ↔ `dunes`.
 
 ## Global Options (work with every command)
 
 | Flag | Description | Example |
 |------|-------------|---------|
-| `--config-path <PATH>` | Path to `doghook.toml` (default: `./doghook.toml` or `~/.config/doghook.toml`) | `--config-path /etc/doghook.toml` |
+| `--config-path <PATH>` | Path to `kabosu.toml` (default: `./kabosu.toml` or `~/.config/kabosu.toml`) | `--config-path /etc/kabosu.toml` |
 | `--data-dir <PATH>` | Override Dogecoin Core data directory (overrides config file) | `--data-dir C:\Dogecoin` |
 
 ---
 
-## 1. `doghook doginals index` — Full Production Sync
+## 1. `kabosu doginals index` — Full Production Sync
 
 **Purpose:** Runs the complete indexer (historical catch-up + live ZMQ tail). Stores everything in Postgres, fires webhooks, and serves the explorer/API.
 
 ```bash
 # Normal full sync (recommended for production)
-doghook doginals index
+kabosu doginals index
 
 # Sync only a specific range (perfect for catching up or backfilling)
-doghook doginals index --from 4600000 --to 4700000
+kabosu doginals index --from 4600000 --to 4700000
 
 # Quick dev test (10 000 blocks in seconds — uses .blk files)
-doghook doginals index --test-blk-range 5000000..5000100
+kabosu doginals index --test-blk-range 5000000..5000100
 ```
 
 ### Key flags
@@ -35,22 +35,22 @@ doghook doginals index --test-blk-range 5000000..5000100
 
 ### Use cases
 
-- **Daily production run:** just `doghook doginals index` (runs forever)
+- **Daily production run:** just `kabosu doginals index` (runs forever)
 - **Backfill a specific week:** `--from 4650000 --to 4660000`
 - **Test a new predicate before production:** `--test-blk-range 5000000..5001000`
 
 ---
 
-## 2. `doghook doginals index scan` — Lightning-Fast Inspector / Exporter
+## 2. `kabosu doginals index scan` — Lightning-Fast Inspector / Exporter
 
 **Purpose:** The killer command. Parses any range of blocks with **zero database writes**. Perfect for debugging, exporting, or analytics.
 
 ```bash
 # Quick look at a range
-doghook doginals index scan --from 4609723 --to 4609823
+kabosu doginals index scan --from 4609723 --to 4609823
 
 # Export to file + filter only image reveals
-doghook doginals index scan \
+kabosu doginals index scan \
   --from 4600000 \
   --to 4700000 \
   --out images.jsonl \
@@ -58,7 +58,7 @@ doghook doginals index scan \
   --reveals-only
 
 # Pipe to jq for instant stats
-doghook doginals index scan --from 5000000 --to 5001000 --reveals-only | jq -r '.content_type' | sort | uniq -c
+kabosu doginals index scan --from 5000000 --to 5001000 --reveals-only | jq -r '.content_type' | sort | uniq -c
 ```
 
 ### Key flags
@@ -97,18 +97,18 @@ doghook doginals index scan --from 5000000 --to 5001000 --reveals-only | jq -r '
 
 ---
 
-## 3. `doghook doginals index refresh-blk-index`
+## 3. `kabosu doginals index refresh-blk-index`
 
 **Purpose:** Refreshes the safe shadow copy of Dogecoin Core's LevelDB block index so the fast `.blk` reader works.
 
 ```bash
-doghook doginals index refresh-blk-index
+kabosu doginals index refresh-blk-index
 ```
 
 **Output example:**
 ```
-BlkReader: index copy refreshed (3 updated, 1247 unchanged) → C:\Users\jheav\.doghook\blk-index
-Run 'doghook doginals index' to enjoy 5-20× faster sync!
+BlkReader: index copy refreshed (3 updated, 1247 unchanged) → C:\Users\jheav\.kabosu\blk-index
+Run 'kabosu doginals index' to enjoy 5-20× faster sync!
 ```
 
 **When to run:**
@@ -123,9 +123,9 @@ Run 'doghook doginals index' to enjoy 5-20× faster sync!
 Just replace `doginals` with `dunes`:
 
 ```bash
-doghook dunes index --from 4600000 --to 4700000
-doghook dunes index scan --from 4609723 --to 4609823 --out dunes.jsonl
-doghook dunes index refresh-blk-index
+kabosu dunes index --from 4600000 --to 4700000
+kabosu dunes index scan --from 4609723 --to 4609823 --out dunes.jsonl
+kabosu dunes index refresh-blk-index
 ```
 
 ---
@@ -134,16 +134,17 @@ doghook dunes index refresh-blk-index
 
 ```bash
 # 1. Daily dev workflow
-doghook doginals index scan --test-blk-range 5000000..5001000 --predicate "mime:image/" --out today.jsonl
+kabosu doginals index scan --test-blk-range 5000000..5001000 --predicate "mime:image/" --out today.jsonl
 
 # 2. Full production with fast mode guaranteed
-doghook doginals index --data-source file
+kabosu doginals index --data-source file
 
 # 3. Export everything from genesis to now (takes hours, not days)
-doghook doginals index scan --from 0 --to 5000000 --out all-reveals.jsonl --reveals-only
+kabosu doginals index scan --from 0 --to 5000000 --out all-reveals.jsonl --reveals-only
 
 # 4. See real-time speed metrics
 curl http://localhost:8080/metrics | grep blocks_indexed_via
 ```
 
-> **Pro tip:** Set `data_source = "auto"` in `doghook.toml` once and forget it — doghook will always use the fastest possible method and tell you in the logs.
+> **Pro tip:** Set `data_source = "auto"` in `kabosu.toml` once and forget it — kabosu will always use the fastest possible method and tell you in the logs.
+

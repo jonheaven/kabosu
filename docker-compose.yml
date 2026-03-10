@@ -17,13 +17,13 @@ services:
       timeout: 5s
       retries: 10
 
-  doghook:
+  kabosu:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      # RPC credentials — override here or in doghook.toml
+      # RPC credentials — override here or in kabosu.toml
       DOGE_RPC_USERNAME: ${DOGE_RPC_USERNAME:-doge}
       DOGE_RPC_PASSWORD: ${DOGE_RPC_PASSWORD:-doge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -31,7 +31,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./doghook.toml:/etc/doghook.toml:ro
+      - ./kabosu.toml:/etc/kabosu.toml:ro
       # Mount Dogecoin Core data directory for fast .blk reads (optional but recommended)
       # - /path/to/.dogecoin:/root/.dogecoin:ro
     healthcheck:
@@ -44,3 +44,4 @@ services:
 
 volumes:
   postgres_data:
+

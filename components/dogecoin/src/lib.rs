@@ -135,7 +135,7 @@ pub async fn start_dogecoin_indexer(
                 None => {
                     return Err(
                         "data_source = \"file\" but the .blk index could not be opened. \
-                         Run `doghook doginals index refresh-blk-index` first, or \
+                         Run `kabosu doginals index refresh-blk-index` first, or \
                          set data_source = \"auto\" to fall back to RPC."
                             .to_string(),
                     );
@@ -169,7 +169,7 @@ pub async fn start_dogecoin_indexer(
                             try_info!(
                                 ctx,
                                 "Data source: RPC (falling back — .blk index unavailable). \
-                                 Run `doghook doginals index refresh-blk-index` to enable \
+                                 Run `kabosu doginals index refresh-blk-index` to enable \
                                  fast mode on next start."
                             );
                             None
@@ -353,3 +353,4 @@ pub async fn start_dogecoin_indexer(
 
     Ok(())
 }
+
