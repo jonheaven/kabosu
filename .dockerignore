@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+.env.local
+.claude/
+target/
+data/
+docs/
+ref/
+*.md

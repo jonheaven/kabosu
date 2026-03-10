@@ -34,6 +34,11 @@ services:
       - ./doghook.toml:/etc/doghook.toml:ro
       # Mount Dogecoin Core data directory for fast .blk reads (optional but recommended)
       # - /path/to/.dogecoin:/root/.dogecoin:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
 volumes:
