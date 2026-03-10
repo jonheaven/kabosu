@@ -372,7 +372,7 @@ impl Iterator for TransactionBytesCursorIterator<'_> {
 mod tests {
     use super::*;
     use bitcoin::Network;
-    use config::config::{DogecoinConfig, DogecoinDataSource};
+    use config::{DogecoinConfig, DogecoinDataSource};
 
     use crate::{
         pipeline::rpc::{parse_downloaded_block, standardize_dogecoin_block},
@@ -384,7 +384,7 @@ mod tests {
     fn test_block_cursor_roundtrip() {
         let ctx = Context::empty();
         let config = DogecoinConfig {
-            network: Network::Dogecoin,
+            network: Network::Bitcoin,
             rpc_url: "http://127.0.0.1:22555".to_string(),
             rpc_username: "".to_string(),
             rpc_password: "".to_string(),

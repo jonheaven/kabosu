@@ -2643,10 +2643,126 @@ pub fn get_vector_040() -> Vec<(DogecoinBlockData, BlockchainEventExpectation)> 
 }
 
 /// Vector 041: Generate the following blocks
-///  
+///
 /// A1(1) - B1(2) - C1(3) -  D1(5) - E1(8) - F1(9)
 ///               \ C2(4)  - D2(6) - E2(7) - F2(10) - G2(11)
 ///
+/// Numbers in parentheses are arrival order. The two branches trade
+/// canonical leadership five times before fork-2 (the C2/D2 branch)
+/// settles as the winner. Tests the oscillating-fork pattern common
+/// on Dogecoin's 1-minute block cadence.
+///
+/// Expected chain events (in order):
+///  1→ apply  A1
+///  2→ apply  B1
+///  3→ apply  C1
+///  4→ reorg  rollback[C1]          apply[C2]            (tie → fork-1 wins)
+///  5→ reorg  rollback[C2]          apply[C1, D1]        (fork-0 length 4)
+///  6→ reorg  rollback[C1, D1]      apply[C2, D2]        (tie → fork-1 wins)
+///  7→ apply  E2                                         (fork-1 length 5)
+///  8→ none   E1                                         (tie, fork-1 stays)
+///  9→ reorg  rollback[C2, D2, E2]  apply[C1, D1, E1, F1] (fork-0 length 6)
+/// 10→ reorg  rollback[C1,D1,E1,F1] apply[C2,D2,E2,F2]  (tie → fork-1 wins)
+/// 11→ apply  G2  confirmed[A1]                          (depth 7 → A1 confirmed)
 pub fn get_vector_041() -> Vec<(DogecoinBlockData, BlockchainEventExpectation)> {
-    vec![]
+    // The fork-2 chain descends from B1, so each block needs an explicit parent.
+    let b1 = bitcoin_blocks::B1(None);
+    let c2 = bitcoin_blocks::C2(Some(b1.clone()));
+    let d2 = bitcoin_blocks::D2(Some(c2.clone()));
+    let e2 = bitcoin_blocks::E2(Some(d2.clone()));
+    let f2 = bitcoin_blocks::F2(Some(e2.clone()));
+    let g2 = bitcoin_blocks::G2(Some(f2.clone()));
+
+    vec![
+        // 1: A1 – genesis
+        (
+            bitcoin_blocks::A1(None),
+            expect_chain_updated_with_block(bitcoin_blocks::A1(None), vec![]),
+        ),
+        // 2: B1 extends A1
+        (
+            b1.clone(),
+            expect_chain_updated_with_block(b1.clone(), vec![]),
+        ),
+        // 3: C1 extends B1 (canonical fork-0: A1→B1→C1)
+        (
+            bitcoin_blocks::C1(None),
+            expect_chain_updated_with_block(bitcoin_blocks::C1(None), vec![]),
+        ),
+        // 4: C2 forks from B1 (fork-1: A1→B1→C2, length 3)
+        //    Tie at length 3 → fork-1 wins (higher fork_id). Reorg: C1 out, C2 in.
+        (
+            c2.clone(),
+            expect_chain_updated_with_block_reorg(
+                vec![bitcoin_blocks::C1(None)],
+                vec![c2.clone()],
+                vec![],
+            ),
+        ),
+        // 5: D1 extends C1 (fork-0 length 4 > fork-1 length 3)
+        //    Fork-0 regains lead. Reorg: C2 out, C1+D1 in.
+        (
+            bitcoin_blocks::D1(None),
+            expect_chain_updated_with_block_reorg(
+                vec![c2.clone()],
+                vec![bitcoin_blocks::C1(None), bitcoin_blocks::D1(None)],
+                vec![],
+            ),
+        ),
+        // 6: D2 extends C2 (fork-1 length 4 = fork-0 length 4)
+        //    Tie → fork-1 wins. Reorg: D1+C1 out, C2+D2 in.
+        (
+            d2.clone(),
+            expect_chain_updated_with_block_reorg(
+                vec![bitcoin_blocks::C1(None), bitcoin_blocks::D1(None)],
+                vec![c2.clone(), d2.clone()],
+                vec![],
+            ),
+        ),
+        // 7: E2 extends D2 (fork-1 length 5 > fork-0 length 4)
+        //    No reorg – just extends the already-canonical fork-1.
+        (
+            e2.clone(),
+            expect_chain_updated_with_block(e2.clone(), vec![]),
+        ),
+        // 8: E1 extends D1 (fork-0 length 5 = fork-1 length 5)
+        //    Tie; fork-1 is already canonical – no change, no event.
+        (bitcoin_blocks::E1(None), expect_no_chain_update()),
+        // 9: F1 extends E1 (fork-0 length 6 > fork-1 length 5)
+        //    Fork-0 regains lead. Reorg: E2+D2+C2 out, C1+D1+E1+F1 in.
+        (
+            bitcoin_blocks::F1(None),
+            expect_chain_updated_with_block_reorg(
+                vec![c2.clone(), d2.clone(), e2.clone()],
+                vec![
+                    bitcoin_blocks::C1(None),
+                    bitcoin_blocks::D1(None),
+                    bitcoin_blocks::E1(None),
+                    bitcoin_blocks::F1(None),
+                ],
+                vec![],
+            ),
+        ),
+        // 10: F2 extends E2 (fork-1 length 6 = fork-0 length 6)
+        //     Tie → fork-1 wins. Reorg: F1+E1+D1+C1 out, C2+D2+E2+F2 in.
+        (
+            f2.clone(),
+            expect_chain_updated_with_block_reorg(
+                vec![
+                    bitcoin_blocks::C1(None),
+                    bitcoin_blocks::D1(None),
+                    bitcoin_blocks::E1(None),
+                    bitcoin_blocks::F1(None),
+                ],
+                vec![c2.clone(), d2.clone(), e2.clone(), f2.clone()],
+                vec![],
+            ),
+        ),
+        // 11: G2 extends F2 (fork-1 length 7 > fork-0 length 6)
+        //     Extends canonical fork-1. Chain is 7 deep → A1 is now confirmed.
+        (
+            g2.clone(),
+            expect_chain_updated_with_block(g2.clone(), vec![bitcoin_blocks::A1(None)]),
+        ),
+    ]
 }

@@ -218,3 +218,8 @@ fn test_bitcoin_vector_039() {
 fn test_bitcoin_vector_040() {
     process_bitcoin_blocks_and_check_expectations(helpers::bitcoin_shapes::get_vector_040());
 }
+
+#[test]
+fn test_bitcoin_vector_041() {
+    process_bitcoin_blocks_and_check_expectations(helpers::bitcoin_shapes::get_vector_041());
+}
