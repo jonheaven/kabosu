@@ -13,3 +13,7 @@ dunes_errors.txt
 # Local environment secrets
 .env
 .env.local
+
+# Claude Code local config (machine-specific, not for the repo)
+.claude/settings.local.json
+.claude/worktrees/
