@@ -97,6 +97,9 @@ pub struct DogecoinConfigToml {
     pub zmq_url: String,
     /// Optional path to Dogecoin Core data directory for direct .blk file reads.
     pub dogecoin_data_dir: Option<String>,
+    /// Optional path to the shared shadow copy of `blocks/index`.
+    /// Can also be set via DOGECOIN_BLK_INDEX_COPY_DIR env var.
+    pub blk_index_copy_dir: Option<String>,
     /// Block ingestion strategy: "auto" | "file" | "rpc". Defaults to "auto".
     /// Can also be set via DOGECOIN_DATA_SOURCE env var.
     pub data_source: Option<String>,
@@ -339,6 +342,8 @@ impl ConfigToml {
                 zmq_url: toml.dogecoin.zmq_url,
                 dogecoin_data_dir: toml.dogecoin.dogecoin_data_dir
                     .or_else(|| std::env::var("DOGECOIN_DATA_DIR").ok()),
+                blk_index_copy_dir: toml.dogecoin.blk_index_copy_dir
+                    .or_else(|| std::env::var("DOGECOIN_BLK_INDEX_COPY_DIR").ok()),
                 data_source: toml.dogecoin.data_source
                     .or_else(|| std::env::var("DOGECOIN_DATA_SOURCE").ok())
                     .as_deref()

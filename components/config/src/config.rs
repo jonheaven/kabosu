@@ -195,6 +195,13 @@ pub struct DogecoinConfig {
     /// When set and `data_source` is `Auto` or `File`, kabosu reads blocks
     /// directly from `.blk` files for initial sync (5-20x faster than RPC).
     pub dogecoin_data_dir: Option<String>,
+    /// Optional path where kabosu stores/reads its shadow copy of
+    /// Dogecoin Core's `blocks/index` LevelDB.
+    ///
+    /// Defaults to `<storage.working_dir>/blk-index` when unset.
+    /// Use this to keep the copy on a larger/faster drive (e.g. `F:`), or
+    /// to share a single copy across multiple indexer workspaces.
+    pub blk_index_copy_dir: Option<String>,
     /// Controls whether to use direct `.blk` file reads or JSON-RPC for
     /// historical block ingestion. Defaults to `Auto`.
     pub data_source: DogecoinDataSource,
@@ -279,6 +286,7 @@ impl Config {
                 network: Network::Regtest,
                 zmq_url: "http://0.0.0.0:18543".into(),
                 dogecoin_data_dir: None,
+                blk_index_copy_dir: None,
                 data_source: DogecoinDataSource::Auto,
             },
             doginals: Some(DoginalConfig {

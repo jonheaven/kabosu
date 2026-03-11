@@ -58,6 +58,10 @@ rpc_url = "http://127.0.0.1:22555"
 # rpc_username and rpc_password are read from env vars DOGE_RPC_USERNAME / DOGE_RPC_PASSWORD.
 # You may also set them here, but do not commit credentials to git.
 zmq_url = "tcp://127.0.0.1:28332"
+# Path to Dogecoin blockchain data directory for faster .blk file indexing (5-20× faster than RPC)
+dogecoin_data_dir = "F:\\DogecoinData"
+# Shared shadow copy of blocks/index to avoid duplicating ~LevelDB files in this repo data dir.
+blk_index_copy_dir = "C:\\Users\\jheav\\AppData\\Roaming\\dog\\blk-index"
 
 # Protocol enable/disable switches.
 # Set enabled = false to skip indexing that protocol entirely.

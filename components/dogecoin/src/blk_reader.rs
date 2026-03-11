@@ -185,7 +185,7 @@ impl BlkReader {
 // Shadow copy management
 // ---------------------------------------------------------------------------
 
-/// Copy Core's `blocks/index/` to `copy_dir`, skipping `LOCK`.
+/// Copy Core's `blocks/index/` to `copy_dir`, skipping transient files.
 ///
 /// Uses smart-copy: a file is only re-copied when the source is newer than
 /// the destination (by mtime). Immutable `.ldb` files are skipped after the
@@ -203,8 +203,26 @@ pub fn refresh_index_copy(live_index: &Path, copy_dir: &Path) -> Result<(u32, u3
         let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
         let name = entry.file_name();
 
-        // Never copy Core's lock file.
-        if name == OsStr::new("LOCK") {
+        // Never copy LevelDB metadata or transient files that can be locked or
+        // that form a fragile linked pair (CURRENT → MANIFEST-N → .ldb files).
+        //
+        // - LOCK:       Core holds an exclusive write lock; never needed in a copy.
+        // - *.log:      Write-ahead log; Core locks it while running.
+        // - CURRENT:    Points to the active MANIFEST.  Copying a new CURRENT
+        //               while the corresponding MANIFEST can't be copied (locked)
+        //               leaves the shadow copy in a broken, unopenable state.
+        // - MANIFEST-*: Core holds this open for writing; also locked.
+        //
+        // Immutable *.ldb files are safe to copy incrementally.
+        // The CURRENT/MANIFEST pair is managed by whoever originally created the
+        // shadow copy (e.g. `dog`) and must never be disturbed by Kabosu.
+        let name_str = name.to_string_lossy();
+        if name == OsStr::new("LOCK")
+            || name == OsStr::new("CURRENT")
+            || name_str.starts_with("MANIFEST-")
+            || name_str.ends_with(".log")
+        {
+            skipped += 1;
             continue;
         }
 
@@ -223,9 +241,23 @@ pub fn refresh_index_copy(live_index: &Path, copy_dir: &Path) -> Result<(u32, u3
             }
         }
 
-        fs::copy(entry.path(), &dst)
-            .map_err(|e| format!("copying {:?}: {e}", name))?;
-        copied += 1;
+        match fs::copy(entry.path(), &dst) {
+            Ok(_) => copied += 1,
+            Err(e) => {
+                // On Windows, Dogecoin Core may hold an exclusive lock on transient
+                // LevelDB files (MANIFEST, *.log) while running.
+                // PermissionDenied covers most cases; raw os error 32 is Windows
+                // ERROR_SHARING_VIOLATION ("being used by another process").
+                // In both cases keep the existing shadow copy of the file and move on.
+                let locked = e.kind() == std::io::ErrorKind::PermissionDenied
+                    || e.raw_os_error() == Some(32);
+                if locked {
+                    skipped += 1;
+                    continue;
+                }
+                return Err(format!("copying {:?}: {e}", name));
+            }
+        }
     }
 
     Ok((copied, skipped))

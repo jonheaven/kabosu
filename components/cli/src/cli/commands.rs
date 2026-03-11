@@ -520,4 +520,3 @@ pub struct DecodeCommand {
     #[clap(long = "config-path")]
     pub config_path: String,
 }
-

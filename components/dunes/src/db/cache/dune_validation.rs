@@ -48,6 +48,7 @@ mod tests {
                 network: bitcoin::Network::Regtest,
                 zmq_url: "tcp://localhost:28332".to_string(),
                 dogecoin_data_dir: None,
+                blk_index_copy_dir: None,
                 data_source: DogecoinDataSource::Auto,
             }
         }

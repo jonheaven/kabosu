@@ -111,6 +111,13 @@ pub async fn start_dogecoin_indexer(
     // File:  Require .blk files; abort if index cannot be opened.
     // Rpc:   Skip .blk files entirely.
     // -----------------------------------------------------------------------
+    let index_copy_dir = config
+        .dogecoin
+        .blk_index_copy_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&config.storage.working_dir).join("blk-index"));
+
     let blk_reader: Option<BlkReader> = match config.dogecoin.data_source {
         DogecoinDataSource::Rpc => {
             try_info!(ctx, "Data source: RPC (direct .blk reads disabled)");
@@ -121,7 +128,6 @@ pub async fn start_dogecoin_indexer(
                 "data_source = \"file\" requires dogecoin.dogecoin_data_dir to be set".to_string()
             })?;
             let blocks_dir = PathBuf::from(data_dir).join("blocks");
-            let index_copy_dir = PathBuf::from(&config.storage.working_dir).join("blk-index");
             match BlkReader::open(&blocks_dir, &index_copy_dir, ctx) {
                 Some(r) => {
                     try_info!(
@@ -153,8 +159,6 @@ pub async fn start_dogecoin_indexer(
                 }
                 Some(data_dir) => {
                     let blocks_dir = PathBuf::from(data_dir).join("blocks");
-                    let index_copy_dir =
-                        PathBuf::from(&config.storage.working_dir).join("blk-index");
                     match BlkReader::open(&blocks_dir, &index_copy_dir, ctx) {
                         Some(r) => {
                             try_info!(

@@ -390,6 +390,7 @@ mod tests {
             rpc_password: "".to_string(),
             zmq_url: "tcp://127.0.0.1:28332".to_string(),
             dogecoin_data_dir: None,
+            blk_index_copy_dir: None,
             data_source: DogecoinDataSource::Auto,
         };
         let block = include_str!("./fixtures/blocks_json/279671.json");

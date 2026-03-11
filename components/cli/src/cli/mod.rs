@@ -75,7 +75,12 @@ fn run_refresh_blk_index(cmd: &RefreshBlkIndexCommand, ctx: &Context) -> Result<
         return Err(format!("block index not found at {}", live_index.display()));
     }
 
-    let copy_dir = PathBuf::from(&config.storage.working_dir).join("blk-index");
+    let copy_dir = config
+        .dogecoin
+        .blk_index_copy_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&config.storage.working_dir).join("blk-index"));
 
     println!("Refreshing block index copy...");
     println!("  Source: {}", live_index.display());
@@ -2121,4 +2126,3 @@ fn parse_dogecoin_address(addr: &str) -> Result<ScriptBuf, String> {
         )),
     }
 }
-
