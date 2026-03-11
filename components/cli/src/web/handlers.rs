@@ -1,19 +1,32 @@
-use std::convert::Infallible;
+use std::{
+    collections::BTreeMap,
+    convert::Infallible,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Json, Response,
+        Html, IntoResponse, Response,
     },
+    Json,
 };
+use deadpool_postgres::tokio_postgres::Row;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
 
+use bitcoin::{
+    base58,
+    consensus::encode::deserialize,
+    hashes::{sha256d, Hash},
+    PubkeyHash, ScriptBuf, ScriptHash, Transaction,
+};
 use dogecoin::bitcoincore_rpc::RpcApi;
 use doginals::envelope::ParsedEnvelope;
 
@@ -964,3 +977,3673 @@ pub async fn lotto_page() -> Html<&'static str> {
     Html(include_str!("../../static/index.html"))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceListResponse<T> {
+    items: Vec<T>,
+    total: usize,
+    next_cursor: Option<String>,
+}
+
+static MARKETPLACE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceFeedParams {
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+    pub cursor: Option<String>,
+    pub status: Option<String>,
+    pub collection_id: Option<String>,
+    pub seller_address: Option<String>,
+    pub maker_address: Option<String>,
+    pub inscription_id: Option<String>,
+    pub min_price: Option<String>,
+    pub max_price: Option<String>,
+    pub sort: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMarketplaceListingRequest {
+    pub inscription_id: String,
+    pub collection_id: Option<String>,
+    pub seller_address: String,
+    pub asking_price_koinu: String,
+    pub marketplace_fee_bps: Option<i32>,
+    pub royalty_bps: Option<i32>,
+    pub expiry_at: Option<String>,
+    pub seller_signed_template: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelMarketplaceListingRequest {
+    pub seller_address: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMarketplaceTraderRequest {
+    pub display_name: Option<String>,
+    pub bio: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMarketplaceOfferRequest {
+    pub scope: String,
+    pub inscription_id: Option<String>,
+    pub collection_id: Option<String>,
+    pub maker_address: String,
+    pub target_seller_address: Option<String>,
+    pub offer_price_koinu: String,
+    pub marketplace_fee_bps: Option<i32>,
+    pub expires_at: String,
+    pub intent_payload: Option<serde_json::Value>,
+    pub signed_intent: MarketplaceSignedIntentEnvelope,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelMarketplaceOfferRequest {
+    pub maker_address: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMarketplaceAuctionRequest {
+    pub inscription_id: String,
+    pub seller_address: String,
+    pub start_price_koinu: String,
+    pub reserve_price_koinu: Option<String>,
+    pub min_increment_koinu: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub anti_sniping_window_sec: Option<i32>,
+    pub anti_sniping_extension_sec: Option<i32>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceSignedIntentEnvelope {
+    pub payload: serde_json::Value,
+    pub signature: String,
+    pub signing_address: String,
+    pub signed_at: String,
+    pub payload_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceAuthChallengeRequest {
+    pub address: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceAuthVerifyRequest {
+    pub address: String,
+    pub challenge_id: String,
+    pub signature: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyMarketplaceXRequest {
+    pub x_handle: String,
+    pub x_user_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildMarketplaceOrderRequest {
+    pub signed_intent: MarketplaceSignedIntentEnvelope,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitMarketplaceOrderRequest {
+    pub signed_psbt: String,
+    pub signed_intent: MarketplaceSignedIntentEnvelope,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMarketplaceBidRequest {
+    pub bidder_address: String,
+    pub bid_amount_koinu: String,
+    pub signed_intent: MarketplaceSignedIntentEnvelope,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelMarketplaceBidRequest {
+    pub bidder_address: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettleMarketplaceAuctionRequest {
+    pub seller_address: String,
+    pub signed_psbt: String,
+    pub signed_intent: MarketplaceSignedIntentEnvelope,
+}
+
+fn marketplace_error(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(json!({
+            "code": code,
+            "message": message.into(),
+        })),
+    )
+        .into_response()
+}
+
+fn marketplace_now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn marketplace_id(prefix: &str) -> String {
+    let counter = MARKETPLACE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "{}_{}_{}",
+        prefix,
+        chrono::Utc::now().timestamp_millis(),
+        counter
+    )
+}
+
+fn marketplace_offset(params: &MarketplaceFeedParams) -> i64 {
+    params
+        .cursor
+        .as_ref()
+        .and_then(|cursor| cursor.parse::<i64>().ok())
+        .unwrap_or(params.offset)
+        .max(0)
+}
+
+fn marketplace_next_cursor(offset: i64, limit: i64, total: i64) -> Option<String> {
+    let next = offset + limit.max(0);
+    if next < total {
+        Some(next.to_string())
+    } else {
+        None
+    }
+}
+
+fn marketplace_parse_koinu(value: &str, field: &str) -> Result<i64, Response> {
+    let parsed = value.parse::<i64>().map_err(|_| {
+        marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_koinu",
+            format!("{} must be an integer koinu amount", field),
+        )
+    })?;
+
+    if parsed <= 0 {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_koinu",
+            format!("{} must be greater than zero", field),
+        ));
+    }
+
+    Ok(parsed)
+}
+
+fn marketplace_parse_optional_koinu(
+    value: &Option<String>,
+    field: &str,
+) -> Result<Option<i64>, Response> {
+    value
+        .as_ref()
+        .map(|value| marketplace_parse_koinu(value, field))
+        .transpose()
+}
+
+fn marketplace_parse_timestamp(
+    value: &str,
+    field: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, Response> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| timestamp.with_timezone(&chrono::Utc))
+        .map_err(|_| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_timestamp",
+                format!("{} must be a valid RFC3339 timestamp", field),
+            )
+        })
+}
+
+fn marketplace_network_name(network: bitcoin::Network) -> &'static str {
+    match network {
+        bitcoin::Network::Bitcoin => "mainnet",
+        bitcoin::Network::Testnet => "testnet",
+        bitcoin::Network::Regtest => "regtest",
+        _ => "mainnet",
+    }
+}
+
+fn marketplace_chain_id(network: bitcoin::Network) -> &'static str {
+    match network {
+        bitcoin::Network::Bitcoin => "doge-mainnet",
+        bitcoin::Network::Testnet => "doge-testnet",
+        bitcoin::Network::Regtest => "doge-regtest",
+        _ => "doge-mainnet",
+    }
+}
+
+fn marketplace_random_token(prefix: &str) -> String {
+    let mut bytes = [0u8; 24];
+    OsRng.fill_bytes(&mut bytes);
+    format!("{}_{}", prefix, hex::encode(bytes))
+}
+
+fn marketplace_canonicalize_json(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(marketplace_canonicalize_json).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut sorted = BTreeMap::new();
+            for (key, value) in map {
+                sorted.insert(key.clone(), marketplace_canonicalize_json(value));
+            }
+
+            let mut normalized = serde_json::Map::new();
+            for (key, value) in sorted {
+                normalized.insert(key, value);
+            }
+            serde_json::Value::Object(normalized)
+        }
+        _ => value.clone(),
+    }
+}
+
+fn marketplace_parse_dogecoin_address(addr: &str) -> Result<ScriptBuf, Response> {
+    let decoded = base58::decode_check(addr).map_err(|_| {
+        marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_address",
+            format!("Invalid Dogecoin address '{}'", addr),
+        )
+    })?;
+
+    if decoded.is_empty() {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_address",
+            format!("Invalid Dogecoin address '{}'", addr),
+        ));
+    }
+
+    let version = decoded[0];
+    let payload = &decoded[1..];
+    match version {
+        0x1e => {
+            let hash = PubkeyHash::from_slice(payload).map_err(|_| {
+                marketplace_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_address",
+                    format!("Invalid Dogecoin P2PKH address '{}'", addr),
+                )
+            })?;
+            Ok(ScriptBuf::new_p2pkh(&hash))
+        }
+        0x16 => {
+            let hash = ScriptHash::from_slice(payload).map_err(|_| {
+                marketplace_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_address",
+                    format!("Invalid Dogecoin P2SH address '{}'", addr),
+                )
+            })?;
+            Ok(ScriptBuf::new_p2sh(&hash))
+        }
+        _ => Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_address",
+            format!("Unsupported Dogecoin address version for '{}'", addr),
+        )),
+    }
+}
+
+fn marketplace_idempotency_key(headers: &HeaderMap) -> Result<String, Response> {
+    headers
+        .get("x-idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "missing_idempotency_key",
+                "X-Idempotency-Key header is required",
+            )
+        })
+}
+
+fn marketplace_metadata_text(value: Option<&serde_json::Value>) -> Option<String> {
+    value.and_then(|value| serde_json::to_string(value).ok())
+}
+
+fn marketplace_parse_metadata(value: Option<String>) -> serde_json::Value {
+    value
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .unwrap_or_else(|| json!({}))
+}
+
+fn marketplace_session_token(headers: &HeaderMap) -> Option<String> {
+    if let Some(value) = headers
+        .get("x-marketplace-session")
+        .and_then(|value| value.to_str().ok())
+    {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+async fn marketplace_require_session(
+    client: &deadpool_postgres::Client,
+    headers: &HeaderMap,
+    address: &str,
+) -> Result<(), Response> {
+    let token = marketplace_session_token(headers).ok_or_else(|| {
+        marketplace_error(
+            StatusCode::UNAUTHORIZED,
+            "missing_session",
+            "Marketplace session token is required",
+        )
+    })?;
+
+    let row = client
+        .query_opt(
+            "SELECT expires_at, revoked_at
+             FROM marketplace_sessions
+             WHERE token = $1 AND address = $2",
+            &[&token, &address],
+        )
+        .await
+        .map_err(|_| {
+            marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to verify marketplace session",
+            )
+        })?
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_session",
+                "Marketplace session is invalid",
+            )
+        })?;
+
+    let revoked_at: Option<String> = row.get("revoked_at");
+    if revoked_at.is_some() {
+        return Err(marketplace_error(
+            StatusCode::UNAUTHORIZED,
+            "invalid_session",
+            "Marketplace session has been revoked",
+        ));
+    }
+
+    let expires_at: String = row.get("expires_at");
+    let expires_at = marketplace_parse_timestamp(&expires_at, "expiresAt")?;
+    if expires_at <= chrono::Utc::now() {
+        return Err(marketplace_error(
+            StatusCode::UNAUTHORIZED,
+            "expired_session",
+            "Marketplace session has expired",
+        ));
+    }
+
+    let now = marketplace_now();
+    let _ = client
+        .execute(
+            "UPDATE marketplace_sessions
+             SET last_used_at = $2
+             WHERE token = $1",
+            &[&token, &now],
+        )
+        .await;
+
+    Ok(())
+}
+
+async fn marketplace_verify_message_signature(
+    state: &AppState,
+    address: &str,
+    message: &str,
+    signature: &str,
+) -> Result<(), Response> {
+    let ctx = dogecoin::utils::Context::empty();
+    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
+    let verified = rpc
+        .call::<bool>(
+            "verifymessage",
+            &[
+                serde_json::to_value(address).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(signature).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(message).unwrap_or(serde_json::Value::Null),
+            ],
+        )
+        .map_err(|_| {
+            marketplace_error(
+                StatusCode::BAD_GATEWAY,
+                "rpc_error",
+                "Failed to verify Dogecoin message signature",
+            )
+        })?;
+
+    if !verified {
+        return Err(marketplace_error(
+            StatusCode::UNAUTHORIZED,
+            "invalid_signature",
+            "Dogecoin message signature verification failed",
+        ));
+    }
+
+    Ok(())
+}
+
+async fn marketplace_consume_intent_nonce(
+    client: &deadpool_postgres::Client,
+    payload: &serde_json::Value,
+    payload_hash: &str,
+) -> Result<(), Response> {
+    let nonce = payload
+        .get("nonce")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent nonce is required",
+            )
+        })?;
+    let address = payload
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent address is required",
+            )
+        })?;
+    let intent_type = payload
+        .get("intentType")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent type is required",
+            )
+        })?;
+    let expires_at = payload
+        .get("expiresAt")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent expiry is required",
+            )
+        })?;
+
+    let now = marketplace_now();
+    let inserted = client
+        .execute(
+            "INSERT INTO marketplace_intent_nonces (
+                 nonce, address, intent_type, payload_hash, expires_at, consumed_at
+             ) VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (nonce) DO NOTHING",
+            &[
+                &nonce,
+                &address,
+                &intent_type,
+                &payload_hash,
+                &expires_at,
+                &now,
+            ],
+        )
+        .await
+        .map_err(|_| {
+            marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to record marketplace intent nonce",
+            )
+        })?;
+
+    if inserted == 0 {
+        return Err(marketplace_error(
+            StatusCode::CONFLICT,
+            "replayed_intent",
+            "Marketplace intent nonce has already been used",
+        ));
+    }
+
+    Ok(())
+}
+
+async fn marketplace_verify_signed_intent(
+    state: &AppState,
+    client: &deadpool_postgres::Client,
+    envelope: &MarketplaceSignedIntentEnvelope,
+    expected_intent_type: &str,
+    expected_address: Option<&str>,
+    consume_nonce: bool,
+) -> Result<serde_json::Value, Response> {
+    let payload = if envelope.payload.is_object() {
+        envelope.payload.clone()
+    } else {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Signed intent payload must be an object",
+        ));
+    };
+
+    let payload_address = payload
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent address is required",
+            )
+        })?;
+    let intent_type = payload
+        .get("intentType")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent type is required",
+            )
+        })?;
+    let expires_at = payload
+        .get("expiresAt")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent expiry is required",
+            )
+        })?;
+    let network = payload
+        .get("network")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent network is required",
+            )
+        })?;
+    let chain_id = payload
+        .get("chainId")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_intent",
+                "Intent chainId is required",
+            )
+        })?;
+
+    if intent_type != expected_intent_type {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            format!(
+                "Intent type mismatch: expected '{}', got '{}'",
+                expected_intent_type, intent_type
+            ),
+        ));
+    }
+    if envelope.signing_address != payload_address {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "signingAddress must match payload address",
+        ));
+    }
+    if let Some(expected_address) = expected_address {
+        if expected_address != payload_address {
+            return Err(marketplace_error(
+                StatusCode::FORBIDDEN,
+                "invalid_intent",
+                "Intent address does not match the expected actor",
+            ));
+        }
+    }
+
+    let expected_network = marketplace_network_name(state.dogecoin_config.network);
+    if network != expected_network {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            format!(
+                "Intent network mismatch: expected '{}', got '{}'",
+                expected_network, network
+            ),
+        ));
+    }
+
+    let expected_chain_id = marketplace_chain_id(state.dogecoin_config.network);
+    if chain_id != expected_chain_id {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            format!(
+                "Intent chainId mismatch: expected '{}', got '{}'",
+                expected_chain_id, chain_id
+            ),
+        ));
+    }
+
+    let expires_at = marketplace_parse_timestamp(expires_at, "expiresAt")?;
+    if expires_at <= chrono::Utc::now() {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent has expired",
+        ));
+    }
+
+    let canonical_payload = marketplace_canonicalize_json(&payload);
+    let canonical_json = serde_json::to_string(&canonical_payload).map_err(|_| {
+        marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_intent",
+            "Failed to canonicalize intent payload",
+        )
+    })?;
+    let computed_payload_hash = sha256d::Hash::hash(canonical_json.as_bytes()).to_string();
+    if computed_payload_hash != envelope.payload_hash {
+        return Err(marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Signed intent payloadHash does not match the canonical payload",
+        ));
+    }
+
+    marketplace_verify_message_signature(
+        state,
+        &envelope.signing_address,
+        &canonical_json,
+        &envelope.signature,
+    )
+    .await?;
+
+    if consume_nonce {
+        marketplace_consume_intent_nonce(client, &payload, &computed_payload_hash).await?;
+    }
+
+    Ok(payload)
+}
+
+fn marketplace_decode_raw_transaction(raw_tx_hex: &str) -> Result<Transaction, Response> {
+    let raw_tx_bytes = hex::decode(raw_tx_hex).map_err(|_| {
+        marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_transaction",
+            "signedPsbt must contain raw transaction hex",
+        )
+    })?;
+
+    deserialize::<Transaction>(&raw_tx_bytes).map_err(|_| {
+        marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_transaction",
+            "Unable to decode raw transaction",
+        )
+    })
+}
+
+fn marketplace_output_value_for_script(transaction: &Transaction, script: &ScriptBuf) -> i64 {
+    transaction
+        .output
+        .iter()
+        .filter(|output| output.script_pubkey == *script)
+        .map(|output| output.value.to_sat() as i64)
+        .sum()
+}
+
+async fn marketplace_broadcast_raw_transaction(
+    state: &AppState,
+    raw_tx_hex: &str,
+) -> Result<String, Response> {
+    let ctx = dogecoin::utils::Context::empty();
+    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
+    rpc.call::<String>(
+        "sendrawtransaction",
+        &[serde_json::to_value(raw_tx_hex).unwrap_or(serde_json::Value::Null)],
+    )
+    .map_err(|_| {
+        marketplace_error(
+            StatusCode::BAD_GATEWAY,
+            "broadcast_failed",
+            "Failed to broadcast raw Dogecoin transaction",
+        )
+    })
+}
+
+async fn marketplace_fetch_tx_status(
+    state: &AppState,
+    txid: &str,
+) -> Result<serde_json::Value, Response> {
+    let ctx = dogecoin::utils::Context::empty();
+    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
+    let response = rpc
+        .call::<serde_json::Value>(
+            "getrawtransaction",
+            &[
+                serde_json::to_value(txid).unwrap_or(serde_json::Value::Null),
+                serde_json::Value::Bool(true),
+            ],
+        )
+        .map_err(|_| {
+            marketplace_error(
+                StatusCode::NOT_FOUND,
+                "tx_not_found",
+                format!("Transaction '{}' was not found", txid),
+            )
+        })?;
+
+    let confirmations = response
+        .get("confirmations")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+
+    Ok(json!({
+        "txid": txid,
+        "confirmations": confirmations,
+        "finalized": confirmations >= 6,
+        "status": if confirmations >= 6 {
+            "finalized"
+        } else if confirmations > 0 {
+            "confirming"
+        } else {
+            "pending"
+        },
+    }))
+}
+
+pub async fn marketplace_health(State(state): State<AppState>) -> impl IntoResponse {
+    Json(json!({
+        "status": "ok",
+        "service": "kabosu-marketplace",
+        "network": format!("{:?}", state.dogecoin_config.network),
+    }))
+}
+
+pub async fn marketplace_sync(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let client = state
+        .doginals_pool
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let latest_indexed_block = client
+        .query_opt(
+            "SELECT block_height::bigint
+             FROM inscriptions
+             ORDER BY number DESC
+             LIMIT 1",
+            &[],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(|row| row.get::<_, i64>(0));
+
+    Ok(Json(json!({
+        "status": "ok",
+        "network": format!("{:?}", state.dogecoin_config.network),
+        "latestIndexedBlock": latest_indexed_block,
+        "syncLagBlocks": serde_json::Value::Null,
+        "reorgDepth": serde_json::Value::Null,
+    })))
+}
+
+fn marketplace_listing_row(row: &Row) -> serde_json::Value {
+    let settlement_txid: Option<String> = row.get("settlement_txid");
+    let settlement = settlement_txid.as_ref().map(|txid| {
+        json!({
+            "txid": txid,
+            "blockHeight": row.get::<_, Option<i64>>("settlement_block_height"),
+            "confirmations": row.get::<_, i32>("settlement_confirmations"),
+            "finalizedAt": row.get::<_, Option<String>>("finalized_at"),
+        })
+    });
+
+    json!({
+        "id": row.get::<_, String>("id"),
+        "inscriptionId": row.get::<_, String>("inscription_id"),
+        "collectionId": row.get::<_, Option<String>>("collection_id"),
+        "sellerAddress": row.get::<_, String>("seller_address"),
+        "askingPriceKoinu": row.get::<_, i64>("asking_price_koinu").to_string(),
+        "currency": row.get::<_, String>("currency"),
+        "marketplaceFeeBps": row.get::<_, i32>("marketplace_fee_bps"),
+        "royaltyBps": row.get::<_, Option<i32>>("royalty_bps"),
+        "status": row.get::<_, String>("status"),
+        "expiryAt": row.get::<_, Option<String>>("expiry_at"),
+        "createdAt": row.get::<_, String>("created_at"),
+        "updatedAt": row.get::<_, String>("updated_at"),
+        "settlement": settlement,
+    })
+}
+
+fn marketplace_offer_row(row: &Row) -> serde_json::Value {
+    json!({
+        "id": row.get::<_, String>("id"),
+        "scope": row.get::<_, String>("scope"),
+        "inscriptionId": row.get::<_, Option<String>>("inscription_id"),
+        "collectionId": row.get::<_, Option<String>>("collection_id"),
+        "makerAddress": row.get::<_, String>("maker_address"),
+        "targetSellerAddress": row.get::<_, Option<String>>("target_seller_address"),
+        "offerPriceKoinu": row.get::<_, i64>("offer_price_koinu").to_string(),
+        "marketplaceFeeBps": row.get::<_, i32>("marketplace_fee_bps"),
+        "status": row.get::<_, String>("status"),
+        "expiresAt": row.get::<_, String>("expires_at"),
+        "createdAt": row.get::<_, String>("created_at"),
+        "updatedAt": row.get::<_, String>("updated_at"),
+    })
+}
+
+fn marketplace_auction_row(row: &Row) -> serde_json::Value {
+    let highest_bid_id: Option<String> = row.get("highest_bid_id");
+    let highest_bid = highest_bid_id.as_ref().map(|bid_id| {
+        json!({
+            "bidId": bid_id,
+            "bidderAddress": row.get::<_, Option<String>>("highest_bidder_address"),
+            "amountKoinu": row
+                .get::<_, Option<i64>>("highest_bid_amount_koinu")
+                .map(|value| value.to_string()),
+            "placedAt": row.get::<_, Option<String>>("highest_bid_placed_at"),
+        })
+    });
+
+    json!({
+        "id": row.get::<_, String>("id"),
+        "inscriptionId": row.get::<_, String>("inscription_id"),
+        "sellerAddress": row.get::<_, String>("seller_address"),
+        "startPriceKoinu": row.get::<_, i64>("start_price_koinu").to_string(),
+        "reservePriceKoinu": row.get::<_, Option<i64>>("reserve_price_koinu").map(|value| value.to_string()),
+        "minIncrementKoinu": row.get::<_, i64>("min_increment_koinu").to_string(),
+        "startsAt": row.get::<_, String>("starts_at"),
+        "endsAt": row.get::<_, String>("ends_at"),
+        "status": row.get::<_, String>("status"),
+        "highestBid": highest_bid,
+    })
+}
+
+fn marketplace_bid_row(row: &Row) -> serde_json::Value {
+    json!({
+        "id": row.get::<_, String>("id"),
+        "auctionId": row.get::<_, String>("auction_id"),
+        "bidderAddress": row.get::<_, String>("bidder_address"),
+        "amountKoinu": row.get::<_, i64>("bid_amount_koinu").to_string(),
+        "status": row.get::<_, String>("status"),
+        "bidderSignature": {
+            "payloadHash": row.get::<_, Option<String>>("bidder_signature_payload_hash"),
+            "signature": row.get::<_, Option<String>>("bidder_signature"),
+            "signingAddress": row.get::<_, Option<String>>("bidder_signing_address"),
+            "signedAt": row.get::<_, Option<String>>("bidder_signed_at"),
+        },
+        "createdAt": row.get::<_, String>("created_at"),
+        "updatedAt": row.get::<_, String>("updated_at"),
+    })
+}
+
+fn marketplace_trader_row(row: &Row) -> serde_json::Value {
+    let x_verified = row.get::<_, bool>("x_verified");
+    let badges = if x_verified {
+        vec!["x_verified".to_string()]
+    } else {
+        Vec::new()
+    };
+
+    json!({
+        "id": row.get::<_, String>("address"),
+        "address": row.get::<_, String>("address"),
+        "displayName": row.get::<_, Option<String>>("display_name"),
+        "bio": row.get::<_, Option<String>>("bio"),
+        "avatarUrl": row.get::<_, Option<String>>("avatar_url"),
+        "xHandle": row.get::<_, Option<String>>("x_handle"),
+        "xUserId": row.get::<_, Option<String>>("x_user_id"),
+        "xVerified": x_verified,
+        "xVerifiedAt": row.get::<_, Option<String>>("x_verified_at"),
+        "verificationLevel": if x_verified { "x_verified" } else { "wallet_verified" },
+        "badges": badges,
+        "metrics": {
+            "totalSalesKoinu": "0",
+            "totalBuysKoinu": "0",
+            "successfulTrades": 0,
+            "offersAccepted": 0,
+            "auctionsWon": 0,
+            "fulfillmentRateBps": 0,
+        },
+        "createdAt": row.get::<_, String>("created_at"),
+        "updatedAt": row.get::<_, String>("updated_at"),
+    })
+}
+
+fn marketplace_default_trader(address: &str) -> serde_json::Value {
+    let now = marketplace_now();
+    json!({
+        "id": address,
+        "address": address,
+        "displayName": serde_json::Value::Null,
+        "bio": serde_json::Value::Null,
+        "avatarUrl": serde_json::Value::Null,
+        "xHandle": serde_json::Value::Null,
+        "xUserId": serde_json::Value::Null,
+        "xVerified": false,
+        "xVerifiedAt": serde_json::Value::Null,
+        "verificationLevel": "none",
+        "badges": [],
+        "metrics": {
+            "totalSalesKoinu": "0",
+            "totalBuysKoinu": "0",
+            "successfulTrades": 0,
+            "offersAccepted": 0,
+            "auctionsWon": 0,
+            "fulfillmentRateBps": 0,
+        },
+        "createdAt": now,
+        "updatedAt": now,
+    })
+}
+
+fn marketplace_activity_row(row: &Row) -> serde_json::Value {
+    json!({
+        "id": row.get::<_, i64>("id").to_string(),
+        "type": row.get::<_, String>("event_type"),
+        "actorAddress": row.get::<_, String>("trader_address"),
+        "subjectId": row.get::<_, String>("entity_id"),
+        "inscriptionId": row.get::<_, Option<String>>("inscription_id"),
+        "amountKoinu": row.get::<_, Option<i64>>("amount_koinu").map(|value| value.to_string()),
+        "txid": row.get::<_, Option<String>>("txid"),
+        "metadata": marketplace_parse_metadata(row.get::<_, Option<String>>("metadata")),
+        "createdAt": row.get::<_, String>("created_at"),
+    })
+}
+
+async fn marketplace_upsert_trader(
+    client: &deadpool_postgres::Client,
+    address: &str,
+) -> Result<(), StatusCode> {
+    let now = marketplace_now();
+    client
+        .execute(
+            "INSERT INTO marketplace_traders (address, created_at, updated_at)
+             VALUES ($1, $2, $2)
+             ON CONFLICT (address)
+             DO UPDATE SET updated_at = marketplace_traders.updated_at",
+            &[&address, &now],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
+}
+
+async fn marketplace_insert_activity(
+    client: &deadpool_postgres::Client,
+    trader_address: &str,
+    event_type: &str,
+    entity_type: &str,
+    entity_id: &str,
+    inscription_id: Option<&String>,
+    amount_koinu: Option<i64>,
+    txid: Option<&String>,
+    metadata: Option<&serde_json::Value>,
+) -> Result<(), StatusCode> {
+    let now = marketplace_now();
+    let metadata_text = marketplace_metadata_text(metadata);
+    client
+        .execute(
+            "INSERT INTO marketplace_activity (
+                 trader_address, event_type, entity_type, entity_id,
+                 inscription_id, amount_koinu, txid, metadata, created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            &[
+                &trader_address,
+                &event_type,
+                &entity_type,
+                &entity_id,
+                &inscription_id,
+                &amount_koinu,
+                &txid,
+                &metadata_text,
+                &now,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
+}
+
+pub async fn list_marketplace_listings(
+    State(state): State<AppState>,
+    Query(params): Query<MarketplaceFeedParams>,
+) -> Result<Json<MarketplaceListResponse<serde_json::Value>>, StatusCode> {
+    let client = state
+        .doginals_pool
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let offset = marketplace_offset(&params);
+    let min_price = marketplace_parse_optional_koinu(&params.min_price, "minPrice")
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let max_price = marketplace_parse_optional_koinu(&params.max_price, "maxPrice")
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let sort_sql = match params.sort.as_deref() {
+        Some("price_asc") => "asking_price_koinu ASC, created_at DESC",
+        Some("price_desc") => "asking_price_koinu DESC, created_at DESC",
+        _ => "created_at DESC",
+    };
+
+    let count_row = client
+        .query_one(
+            "SELECT COUNT(*)::bigint
+             FROM marketplace_listings
+             WHERE ($1::text IS NULL OR status = $1)
+               AND ($2::text IS NULL OR collection_id = $2)
+               AND ($3::text IS NULL OR seller_address = $3)
+               AND ($4::text IS NULL OR inscription_id = $4)
+               AND ($5::bigint IS NULL OR asking_price_koinu >= $5)
+               AND ($6::bigint IS NULL OR asking_price_koinu <= $6)",
+            &[
+                &params.status,
+                &params.collection_id,
+                &params.seller_address,
+                &params.inscription_id,
+                &min_price,
+                &max_price,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total: i64 = count_row.get(0);
+
+    let query = format!(
+        "SELECT id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                settlement_txid, settlement_block_height, settlement_confirmations,
+                finalized_at, created_at, updated_at
+         FROM marketplace_listings
+         WHERE ($1::text IS NULL OR status = $1)
+           AND ($2::text IS NULL OR collection_id = $2)
+           AND ($3::text IS NULL OR seller_address = $3)
+           AND ($4::text IS NULL OR inscription_id = $4)
+           AND ($5::bigint IS NULL OR asking_price_koinu >= $5)
+           AND ($6::bigint IS NULL OR asking_price_koinu <= $6)
+         ORDER BY {}
+         LIMIT $7 OFFSET $8",
+        sort_sql
+    );
+
+    let rows = client
+        .query(
+            &query,
+            &[
+                &params.status,
+                &params.collection_id,
+                &params.seller_address,
+                &params.inscription_id,
+                &min_price,
+                &max_price,
+                &params.limit,
+                &offset,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(MarketplaceListResponse {
+        items: rows.iter().map(marketplace_listing_row).collect(),
+        total: total.max(0) as usize,
+        next_cursor: marketplace_next_cursor(offset, params.limit, total),
+    }))
+}
+
+pub async fn get_marketplace_listing(
+    State(state): State<AppState>,
+    Path(listing_id): Path<String>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    match client
+        .query_opt(
+            "SELECT id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                    currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                    settlement_txid, settlement_block_height, settlement_confirmations,
+                    finalized_at, created_at, updated_at
+             FROM marketplace_listings
+             WHERE id = $1",
+            &[&listing_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => Json(marketplace_listing_row(&row)).into_response(),
+        Ok(None) => marketplace_error(
+            StatusCode::NOT_FOUND,
+            "listing_not_found",
+            format!("Marketplace listing '{}' was not found", listing_id),
+        ),
+        Err(_) => marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to load listing",
+        ),
+    }
+}
+
+pub async fn create_marketplace_listing(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateMarketplaceListingRequest>,
+) -> impl IntoResponse {
+    let idempotency_key = match marketplace_idempotency_key(&headers) {
+        Ok(key) => key,
+        Err(response) => return response,
+    };
+
+    let asking_price_koinu =
+        match marketplace_parse_koinu(&body.asking_price_koinu, "askingPriceKoinu") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+
+    if body.seller_address.trim().is_empty() || body.inscription_id.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_listing",
+            "sellerAddress and inscriptionId are required",
+        );
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) =
+        marketplace_require_session(&client, &headers, &body.seller_address).await
+    {
+        return response;
+    }
+
+    match client
+        .query_opt(
+            "SELECT id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                    currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                    settlement_txid, settlement_block_height, settlement_confirmations,
+                    finalized_at, created_at, updated_at
+             FROM marketplace_listings
+             WHERE idempotency_key = $1",
+            &[&idempotency_key],
+        )
+        .await
+    {
+        Ok(Some(row)) => return Json(marketplace_listing_row(&row)).into_response(),
+        Ok(None) => {}
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to check listing idempotency",
+            )
+        }
+    }
+
+    if marketplace_upsert_trader(&client, &body.seller_address)
+        .await
+        .is_err()
+    {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let listing_id = marketplace_id("lst");
+    let now = marketplace_now();
+    let seller_signed_template = marketplace_metadata_text(body.seller_signed_template.as_ref());
+
+    let row = match client
+        .query_one(
+            "INSERT INTO marketplace_listings (
+                 id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                 currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                 seller_signed_template, created_at, updated_at, idempotency_key
+             ) VALUES (
+                 $1, $2, $3, $4, $5,
+                 'DOGE', $6, $7, 'active', $8,
+                 $9, $10, $10, $11
+             )
+             RETURNING id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                       currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                       settlement_txid, settlement_block_height, settlement_confirmations,
+                       finalized_at, created_at, updated_at",
+            &[
+                &listing_id,
+                &body.inscription_id,
+                &body.collection_id,
+                &body.seller_address,
+                &asking_price_koinu,
+                &body.marketplace_fee_bps.unwrap_or(0),
+                &body.royalty_bps,
+                &body.expiry_at,
+                &seller_signed_template,
+                &now,
+                &idempotency_key,
+            ],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to create marketplace listing",
+            )
+        }
+    };
+
+    let activity_metadata = json!({
+        "collectionId": body.collection_id,
+        "askingPriceKoinu": asking_price_koinu.to_string(),
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &body.seller_address,
+        "listing_created",
+        "listing",
+        &listing_id,
+        Some(&body.inscription_id),
+        Some(asking_price_koinu),
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    (StatusCode::CREATED, Json(marketplace_listing_row(&row))).into_response()
+}
+
+pub async fn cancel_marketplace_listing(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(listing_id): Path<String>,
+    Json(body): Json<CancelMarketplaceListingRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) =
+        marketplace_require_session(&client, &headers, &body.seller_address).await
+    {
+        return response;
+    }
+
+    let existing = match client
+        .query_opt(
+            "SELECT seller_address, inscription_id, status
+             FROM marketplace_listings
+             WHERE id = $1",
+            &[&listing_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "listing_not_found",
+                format!("Marketplace listing '{}' was not found", listing_id),
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load listing for cancellation",
+            )
+        }
+    };
+
+    let seller_address: String = existing.get("seller_address");
+    let inscription_id: String = existing.get("inscription_id");
+    let status: String = existing.get("status");
+
+    if seller_address != body.seller_address {
+        return marketplace_error(
+            StatusCode::FORBIDDEN,
+            "listing_cancel_forbidden",
+            "sellerAddress does not match the listing owner",
+        );
+    }
+    if status == "cancelled" {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "listing_already_cancelled",
+            "Listing is already cancelled",
+        );
+    }
+
+    let now = marketplace_now();
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_listings
+             SET status = 'cancelled', updated_at = $2
+             WHERE id = $1
+             RETURNING id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                       currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                       settlement_txid, settlement_block_height, settlement_confirmations,
+                       finalized_at, created_at, updated_at",
+            &[&listing_id, &now],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to cancel listing",
+            )
+        }
+    };
+
+    let _ = marketplace_insert_activity(
+        &client,
+        &seller_address,
+        "listing_cancelled",
+        "listing",
+        &listing_id,
+        Some(&inscription_id),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    Json(marketplace_listing_row(&row)).into_response()
+}
+
+pub async fn create_marketplace_auth_challenge(
+    State(state): State<AppState>,
+    Json(body): Json<MarketplaceAuthChallengeRequest>,
+) -> impl IntoResponse {
+    if body.address.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_auth_request",
+            "address is required",
+        );
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    let challenge_id = marketplace_id("auth");
+    let challenge_token = marketplace_random_token("challenge");
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
+    let created_at = marketplace_now();
+    let message = format!(
+        "wzrd.dog marketplace auth\naddress:{}\nchallenge:{}\nexpiresAt:{}",
+        body.address, challenge_token, expires_at
+    );
+
+    match client
+        .execute(
+            "INSERT INTO marketplace_auth_challenges (
+                 id, address, challenge_token, message, expires_at, created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6)",
+            &[
+                &challenge_id,
+                &body.address,
+                &challenge_token,
+                &message,
+                &expires_at,
+                &created_at,
+            ],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to create marketplace auth challenge",
+            )
+        }
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "challengeId": challenge_id,
+            "address": body.address,
+            "message": message,
+            "expiresAt": expires_at,
+        })),
+    )
+        .into_response()
+}
+
+pub async fn verify_marketplace_auth_challenge(
+    State(state): State<AppState>,
+    Json(body): Json<MarketplaceAuthVerifyRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    let challenge = match client
+        .query_opt(
+            "SELECT message, expires_at, used_at
+             FROM marketplace_auth_challenges
+             WHERE id = $1 AND address = $2",
+            &[&body.challenge_id, &body.address],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "challenge_not_found",
+                "Marketplace auth challenge was not found",
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load marketplace auth challenge",
+            )
+        }
+    };
+
+    let used_at: Option<String> = challenge.get("used_at");
+    if used_at.is_some() {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "challenge_used",
+            "Marketplace auth challenge has already been used",
+        );
+    }
+
+    let expires_at: String = challenge.get("expires_at");
+    let expires_at = match marketplace_parse_timestamp(&expires_at, "expiresAt") {
+        Ok(expires_at) => expires_at,
+        Err(response) => return response,
+    };
+    if expires_at <= chrono::Utc::now() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "challenge_expired",
+            "Marketplace auth challenge has expired",
+        );
+    }
+
+    let message: String = challenge.get("message");
+    if let Err(response) =
+        marketplace_verify_message_signature(&state, &body.address, &message, &body.signature).await
+    {
+        return response;
+    }
+
+    let now = marketplace_now();
+    match client
+        .execute(
+            "UPDATE marketplace_auth_challenges
+             SET used_at = $2
+             WHERE id = $1 AND used_at IS NULL",
+            &[&body.challenge_id, &now],
+        )
+        .await
+    {
+        Ok(1) => {}
+        Ok(_) => {
+            return marketplace_error(
+                StatusCode::CONFLICT,
+                "challenge_used",
+                "Marketplace auth challenge has already been consumed",
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to finalize marketplace auth challenge",
+            )
+        }
+    }
+
+    if marketplace_upsert_trader(&client, &body.address)
+        .await
+        .is_err()
+    {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let session_token = marketplace_random_token("session");
+    let session_expires_at = (chrono::Utc::now() + chrono::Duration::hours(12)).to_rfc3339();
+    match client
+        .execute(
+            "INSERT INTO marketplace_sessions (
+                 token, address, expires_at, revoked_at, created_at, last_used_at
+             ) VALUES ($1, $2, $3, NULL, $4, $4)",
+            &[&session_token, &body.address, &session_expires_at, &now],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to create marketplace session",
+            )
+        }
+    }
+
+    Json(json!({
+        "address": body.address,
+        "sessionToken": session_token,
+        "expiresAt": session_expires_at,
+    }))
+    .into_response()
+}
+
+pub async fn build_marketplace_order(
+    State(state): State<AppState>,
+    Path(listing_id): Path<String>,
+    Json(body): Json<BuildMarketplaceOrderRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    let payload = match marketplace_verify_signed_intent(
+        &state,
+        &client,
+        &body.signed_intent,
+        "listing_buy",
+        None,
+        false,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    let listing = match client
+        .query_opt(
+            "SELECT id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                    currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                    settlement_txid, settlement_block_height, settlement_confirmations,
+                    finalized_at, created_at, updated_at
+             FROM marketplace_listings
+             WHERE id = $1",
+            &[&listing_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "listing_not_found",
+                format!("Marketplace listing '{}' was not found", listing_id),
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load marketplace listing",
+            )
+        }
+    };
+
+    let listing_json = marketplace_listing_row(&listing);
+    let status = listing_json
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    if status != "active" {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "listing_not_buyable",
+            format!("Listing cannot be purchased while in '{}' state", status),
+        );
+    }
+
+    if payload
+        .get("listingId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != listing_id)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent listingId does not match the requested listing",
+        );
+    }
+
+    let buyer_address = payload
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let seller_address = listing.get::<_, String>("seller_address");
+    let asking_price_koinu = listing.get::<_, i64>("asking_price_koinu");
+
+    Json(json!({
+        "listing": listing_json,
+        "buyerAddress": buyer_address,
+        "sellerAddress": seller_address,
+        "requiredOutputs": [
+            {
+                "address": seller_address,
+                "amountKoinu": asking_price_koinu.to_string(),
+            }
+        ],
+        "feePolicy": {
+            "currency": "DOGE",
+            "marketplaceFeeBps": listing.get::<_, i32>("marketplace_fee_bps"),
+            "buyerPaysKoinu": asking_price_koinu.to_string(),
+            "sellerReceivesKoinu": asking_price_koinu.to_string(),
+        },
+        "submitFormat": "raw_tx_hex_in_signedPsbt_field",
+        "intent": {
+            "payloadHash": body.signed_intent.payload_hash,
+            "signedAt": body.signed_intent.signed_at,
+        }
+    }))
+    .into_response()
+}
+
+pub async fn submit_marketplace_order(
+    State(state): State<AppState>,
+    Path(listing_id): Path<String>,
+    Json(body): Json<SubmitMarketplaceOrderRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    let payload = match marketplace_verify_signed_intent(
+        &state,
+        &client,
+        &body.signed_intent,
+        "listing_buy",
+        None,
+        true,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    let listing = match client
+        .query_opt(
+            "SELECT id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                    currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                    settlement_txid, settlement_block_height, settlement_confirmations,
+                    finalized_at, created_at, updated_at
+             FROM marketplace_listings
+             WHERE id = $1",
+            &[&listing_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "listing_not_found",
+                format!("Marketplace listing '{}' was not found", listing_id),
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load marketplace listing",
+            )
+        }
+    };
+
+    let current_status: String = listing.get("status");
+    if current_status != "active" {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "listing_not_buyable",
+            format!(
+                "Listing cannot be submitted while in '{}' state",
+                current_status
+            ),
+        );
+    }
+
+    if payload
+        .get("listingId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != listing_id)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent listingId does not match the requested listing",
+        );
+    }
+
+    let seller_address: String = listing.get("seller_address");
+    let inscription_id: String = listing.get("inscription_id");
+    let asking_price_koinu: i64 = listing.get("asking_price_koinu");
+    let buyer_address = payload
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+
+    let transaction = match marketplace_decode_raw_transaction(&body.signed_psbt) {
+        Ok(transaction) => transaction,
+        Err(response) => return response,
+    };
+    let seller_script = match marketplace_parse_dogecoin_address(&seller_address) {
+        Ok(script) => script,
+        Err(response) => return response,
+    };
+    let seller_paid_koinu = marketplace_output_value_for_script(&transaction, &seller_script);
+    if seller_paid_koinu < asking_price_koinu {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "insufficient_payment",
+            format!(
+                "Transaction pays {} koinu to seller but listing requires {}",
+                seller_paid_koinu, asking_price_koinu
+            ),
+        );
+    }
+
+    let txid = match marketplace_broadcast_raw_transaction(&state, &body.signed_psbt).await {
+        Ok(txid) => txid,
+        Err(response) => return response,
+    };
+    let now = marketplace_now();
+    let txid_string = txid.clone();
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_listings
+             SET status = 'sold_pending_settlement',
+                 settlement_txid = $2,
+                 settlement_confirmations = 0,
+                 updated_at = $3
+             WHERE id = $1
+             RETURNING id, inscription_id, collection_id, seller_address, asking_price_koinu,
+                       currency, marketplace_fee_bps, royalty_bps, status, expiry_at,
+                       settlement_txid, settlement_block_height, settlement_confirmations,
+                       finalized_at, created_at, updated_at",
+            &[&listing_id, &txid_string, &now],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to update marketplace listing after broadcast",
+            )
+        }
+    };
+
+    let seller_metadata = json!({
+        "buyerAddress": buyer_address,
+        "listingId": listing_id,
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &seller_address,
+        "listing_sold",
+        "listing",
+        &listing_id,
+        Some(&inscription_id),
+        Some(asking_price_koinu),
+        Some(&txid_string),
+        Some(&seller_metadata),
+    )
+    .await;
+
+    if buyer_address != seller_address {
+        let buyer_metadata = json!({
+            "sellerAddress": seller_address,
+            "listingId": listing_id,
+        });
+        let _ = marketplace_insert_activity(
+            &client,
+            &buyer_address,
+            "listing_sold",
+            "listing",
+            &listing_id,
+            Some(&inscription_id),
+            Some(asking_price_koinu),
+            Some(&txid_string),
+            Some(&buyer_metadata),
+        )
+        .await;
+    }
+
+    Json(json!({
+        "listing": marketplace_listing_row(&row),
+        "txid": txid_string,
+        "confirmations": 0,
+        "finalized": false,
+        "status": "sold_pending_settlement",
+    }))
+    .into_response()
+}
+
+pub async fn get_marketplace_tx_status(
+    State(state): State<AppState>,
+    Path(txid): Path<String>,
+) -> impl IntoResponse {
+    match marketplace_fetch_tx_status(&state, &txid).await {
+        Ok(status) => Json(status).into_response(),
+        Err(_) => Json(json!({
+            "txid": txid,
+            "confirmations": 0,
+            "finalized": false,
+            "status": "pending",
+        }))
+        .into_response(),
+    }
+}
+
+pub async fn get_marketplace_trader(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    match client
+        .query_opt(
+            "SELECT address, display_name, bio, avatar_url, x_handle, x_user_id,
+                    x_verified, x_verified_at, created_at, updated_at
+             FROM marketplace_traders
+             WHERE address = $1",
+            &[&address],
+        )
+        .await
+    {
+        Ok(Some(row)) => Json(marketplace_trader_row(&row)).into_response(),
+        Ok(None) => Json(marketplace_default_trader(&address)).into_response(),
+        Err(_) => marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to load trader profile",
+        ),
+    }
+}
+
+pub async fn update_marketplace_trader(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(address): Path<String>,
+    Json(body): Json<UpdateMarketplaceTraderRequest>,
+) -> impl IntoResponse {
+    if address.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_trader",
+            "address is required",
+        );
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) = marketplace_require_session(&client, &headers, &address).await {
+        return response;
+    }
+
+    if marketplace_upsert_trader(&client, &address).await.is_err() {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let now = marketplace_now();
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_traders
+             SET display_name = COALESCE($2, display_name),
+                 bio = COALESCE($3, bio),
+                 avatar_url = COALESCE($4, avatar_url),
+                 updated_at = $5
+             WHERE address = $1
+             RETURNING address, display_name, bio, avatar_url, x_handle, x_user_id,
+                       x_verified, x_verified_at, created_at, updated_at",
+            &[
+                &address,
+                &body.display_name,
+                &body.bio,
+                &body.avatar_url,
+                &now,
+            ],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to update trader profile",
+            )
+        }
+    };
+
+    let activity_metadata = json!({
+        "displayName": body.display_name,
+        "bio": body.bio,
+        "avatarUrl": body.avatar_url,
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &address,
+        "profile_updated",
+        "trader",
+        &address,
+        None,
+        None,
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    Json(marketplace_trader_row(&row)).into_response()
+}
+
+pub async fn verify_marketplace_trader_x(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(address): Path<String>,
+    Json(body): Json<VerifyMarketplaceXRequest>,
+) -> impl IntoResponse {
+    if body.x_handle.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_x_profile",
+            "xHandle is required",
+        );
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) = marketplace_require_session(&client, &headers, &address).await {
+        return response;
+    }
+
+    if marketplace_upsert_trader(&client, &address).await.is_err() {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let now = marketplace_now();
+    let x_handle = body.x_handle.trim().trim_start_matches('@').to_string();
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_traders
+             SET x_handle = $2,
+                 x_user_id = $3,
+                 x_verified = TRUE,
+                 x_verified_at = $4,
+                 updated_at = $4
+             WHERE address = $1
+             RETURNING address, display_name, bio, avatar_url, x_handle, x_user_id,
+                       x_verified, x_verified_at, created_at, updated_at",
+            &[&address, &x_handle, &body.x_user_id, &now],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to verify X profile",
+            )
+        }
+    };
+
+    let activity_metadata = json!({
+        "xHandle": x_handle,
+        "xUserId": body.x_user_id,
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &address,
+        "x_verified",
+        "trader",
+        &address,
+        None,
+        None,
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    Json(marketplace_trader_row(&row)).into_response()
+}
+
+pub async fn get_marketplace_trader_activity(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+    Query(params): Query<MarketplaceFeedParams>,
+) -> Result<Json<MarketplaceListResponse<serde_json::Value>>, StatusCode> {
+    let client = state
+        .doginals_pool
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let offset = marketplace_offset(&params);
+    let count_row = client
+        .query_one(
+            "SELECT COUNT(*)::bigint
+             FROM marketplace_activity
+             WHERE trader_address = $1",
+            &[&address],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total: i64 = count_row.get(0);
+
+    let rows = client
+        .query(
+            "SELECT id, trader_address, event_type, entity_id, inscription_id,
+                    amount_koinu, txid, metadata, created_at
+             FROM marketplace_activity
+             WHERE trader_address = $1
+             ORDER BY id DESC
+             LIMIT $2 OFFSET $3",
+            &[&address, &params.limit, &offset],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(MarketplaceListResponse {
+        items: rows.iter().map(marketplace_activity_row).collect(),
+        total: total.max(0) as usize,
+        next_cursor: marketplace_next_cursor(offset, params.limit, total),
+    }))
+}
+
+pub async fn list_marketplace_offers(
+    State(state): State<AppState>,
+    Query(params): Query<MarketplaceFeedParams>,
+) -> Result<Json<MarketplaceListResponse<serde_json::Value>>, StatusCode> {
+    let client = state
+        .doginals_pool
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let offset = marketplace_offset(&params);
+    let min_price = marketplace_parse_optional_koinu(&params.min_price, "minPrice")
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let max_price = marketplace_parse_optional_koinu(&params.max_price, "maxPrice")
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let sort_sql = match params.sort.as_deref() {
+        Some("price_asc") => "offer_price_koinu ASC, created_at DESC",
+        Some("price_desc") => "offer_price_koinu DESC, created_at DESC",
+        _ => "created_at DESC",
+    };
+
+    let count_row = client
+        .query_one(
+            "SELECT COUNT(*)::bigint
+             FROM marketplace_offers
+             WHERE ($1::text IS NULL OR status = $1)
+               AND ($2::text IS NULL OR collection_id = $2)
+               AND ($3::text IS NULL OR maker_address = $3)
+               AND ($4::text IS NULL OR inscription_id = $4)
+               AND ($5::bigint IS NULL OR offer_price_koinu >= $5)
+               AND ($6::bigint IS NULL OR offer_price_koinu <= $6)",
+            &[
+                &params.status,
+                &params.collection_id,
+                &params.maker_address,
+                &params.inscription_id,
+                &min_price,
+                &max_price,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total: i64 = count_row.get(0);
+
+    let query = format!(
+        "SELECT id, scope, inscription_id, collection_id, maker_address,
+                target_seller_address, offer_price_koinu, marketplace_fee_bps,
+                status, expires_at, created_at, updated_at
+         FROM marketplace_offers
+         WHERE ($1::text IS NULL OR status = $1)
+           AND ($2::text IS NULL OR collection_id = $2)
+           AND ($3::text IS NULL OR maker_address = $3)
+           AND ($4::text IS NULL OR inscription_id = $4)
+           AND ($5::bigint IS NULL OR offer_price_koinu >= $5)
+           AND ($6::bigint IS NULL OR offer_price_koinu <= $6)
+         ORDER BY {}
+         LIMIT $7 OFFSET $8",
+        sort_sql
+    );
+
+    let rows = client
+        .query(
+            &query,
+            &[
+                &params.status,
+                &params.collection_id,
+                &params.maker_address,
+                &params.inscription_id,
+                &min_price,
+                &max_price,
+                &params.limit,
+                &offset,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(MarketplaceListResponse {
+        items: rows.iter().map(marketplace_offer_row).collect(),
+        total: total.max(0) as usize,
+        next_cursor: marketplace_next_cursor(offset, params.limit, total),
+    }))
+}
+
+pub async fn create_marketplace_offer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateMarketplaceOfferRequest>,
+) -> impl IntoResponse {
+    let idempotency_key = match marketplace_idempotency_key(&headers) {
+        Ok(key) => key,
+        Err(response) => return response,
+    };
+
+    let offer_price_koinu =
+        match marketplace_parse_koinu(&body.offer_price_koinu, "offerPriceKoinu") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let expires_at = match marketplace_parse_timestamp(&body.expires_at, "expiresAt") {
+        Ok(timestamp) => timestamp,
+        Err(response) => return response,
+    };
+
+    if expires_at <= chrono::Utc::now() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_offer",
+            "expiresAt must be in the future",
+        );
+    }
+
+    if body.maker_address.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_offer",
+            "makerAddress is required",
+        );
+    }
+
+    let scope = body.scope.trim().to_ascii_lowercase();
+    match scope.as_str() {
+        "item"
+            if body
+                .inscription_id
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty() =>
+        {
+            return marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_offer",
+                "inscriptionId is required for item offers",
+            )
+        }
+        "collection"
+            if body
+                .collection_id
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty() =>
+        {
+            return marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_offer",
+                "collectionId is required for collection offers",
+            )
+        }
+        "item" | "collection" => {}
+        _ => {
+            return marketplace_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_offer",
+                "scope must be either 'item' or 'collection'",
+            )
+        }
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    match client
+        .query_opt(
+            "SELECT id, scope, inscription_id, collection_id, maker_address,
+                    target_seller_address, offer_price_koinu, marketplace_fee_bps,
+                    status, expires_at, created_at, updated_at
+             FROM marketplace_offers
+             WHERE idempotency_key = $1",
+            &[&idempotency_key],
+        )
+        .await
+    {
+        Ok(Some(row)) => return Json(marketplace_offer_row(&row)).into_response(),
+        Ok(None) => {}
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to check offer idempotency",
+            )
+        }
+    }
+
+    let payload = match marketplace_verify_signed_intent(
+        &state,
+        &client,
+        &body.signed_intent,
+        "offer_create",
+        Some(&body.maker_address),
+        true,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    if payload
+        .get("offerPriceKoinu")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != body.offer_price_koinu)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent offerPriceKoinu does not match the request body",
+        );
+    }
+    if payload
+        .get("scope")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != scope)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent scope does not match the request body",
+        );
+    }
+    if payload
+        .get("collectionId")
+        .and_then(serde_json::Value::as_str)
+        .zip(body.collection_id.as_deref())
+        .is_some_and(|(intent_value, body_value)| intent_value != body_value)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent collectionId does not match the request body",
+        );
+    }
+    if payload
+        .get("inscriptionId")
+        .and_then(serde_json::Value::as_str)
+        .zip(body.inscription_id.as_deref())
+        .is_some_and(|(intent_value, body_value)| intent_value != body_value)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent inscriptionId does not match the request body",
+        );
+    }
+
+    if marketplace_upsert_trader(&client, &body.maker_address)
+        .await
+        .is_err()
+    {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let offer_id = marketplace_id("off");
+    let now = marketplace_now();
+    let expires_at_text = expires_at.to_rfc3339();
+    let intent_payload = marketplace_metadata_text(body.intent_payload.as_ref());
+
+    let row = match client
+        .query_one(
+            "INSERT INTO marketplace_offers (
+                 id, scope, inscription_id, collection_id, maker_address,
+                 target_seller_address, offer_price_koinu, marketplace_fee_bps,
+                 status, expires_at, intent_payload, created_at, updated_at, idempotency_key
+             ) VALUES (
+                 $1, $2, $3, $4, $5,
+                 $6, $7, $8,
+                 'active', $9, $10, $11, $11, $12
+             )
+             RETURNING id, scope, inscription_id, collection_id, maker_address,
+                       target_seller_address, offer_price_koinu, marketplace_fee_bps,
+                       status, expires_at, created_at, updated_at",
+            &[
+                &offer_id,
+                &scope,
+                &body.inscription_id,
+                &body.collection_id,
+                &body.maker_address,
+                &body.target_seller_address,
+                &offer_price_koinu,
+                &body.marketplace_fee_bps.unwrap_or(0),
+                &expires_at_text,
+                &intent_payload,
+                &now,
+                &idempotency_key,
+            ],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to create marketplace offer",
+            )
+        }
+    };
+
+    let activity_metadata = json!({
+        "scope": scope,
+        "collectionId": body.collection_id,
+        "targetSellerAddress": body.target_seller_address,
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &body.maker_address,
+        "offer_created",
+        "offer",
+        &offer_id,
+        body.inscription_id.as_ref(),
+        Some(offer_price_koinu),
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    (StatusCode::CREATED, Json(marketplace_offer_row(&row))).into_response()
+}
+
+pub async fn cancel_marketplace_offer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(offer_id): Path<String>,
+    Json(body): Json<CancelMarketplaceOfferRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) = marketplace_require_session(&client, &headers, &body.maker_address).await
+    {
+        return response;
+    }
+
+    let existing = match client
+        .query_opt(
+            "SELECT maker_address, inscription_id, status
+             FROM marketplace_offers
+             WHERE id = $1",
+            &[&offer_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "offer_not_found",
+                format!("Marketplace offer '{}' was not found", offer_id),
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load offer for cancellation",
+            )
+        }
+    };
+
+    let maker_address: String = existing.get("maker_address");
+    let inscription_id: Option<String> = existing.get("inscription_id");
+    let status: String = existing.get("status");
+
+    if maker_address != body.maker_address {
+        return marketplace_error(
+            StatusCode::FORBIDDEN,
+            "offer_cancel_forbidden",
+            "makerAddress does not match the offer owner",
+        );
+    }
+    if status == "cancelled" {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "offer_already_cancelled",
+            "Offer is already cancelled",
+        );
+    }
+    if status != "active" {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "offer_not_cancellable",
+            format!("Offer cannot be cancelled while in '{}' state", status),
+        );
+    }
+
+    let now = marketplace_now();
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_offers
+             SET status = 'cancelled', updated_at = $2
+             WHERE id = $1
+             RETURNING id, scope, inscription_id, collection_id, maker_address,
+                       target_seller_address, offer_price_koinu, marketplace_fee_bps,
+                       status, expires_at, created_at, updated_at",
+            &[&offer_id, &now],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to cancel offer",
+            )
+        }
+    };
+
+    let _ = marketplace_insert_activity(
+        &client,
+        &maker_address,
+        "offer_cancelled",
+        "offer",
+        &offer_id,
+        inscription_id.as_ref(),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    Json(marketplace_offer_row(&row)).into_response()
+}
+
+pub async fn get_marketplace_auction(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    match client
+        .query_opt(
+            "SELECT id, inscription_id, seller_address, start_price_koinu,
+                    reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                    status, highest_bid_id, highest_bidder_address,
+                    highest_bid_amount_koinu, highest_bid_placed_at
+             FROM marketplace_auctions
+             WHERE id = $1",
+            &[&auction_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => {
+            let bids = client
+                .query(
+                    "SELECT id, auction_id, bidder_address, bid_amount_koinu, status,
+                            bidder_signature_payload_hash, bidder_signature,
+                            bidder_signing_address, bidder_signed_at, created_at, updated_at
+                     FROM marketplace_auction_bids
+                     WHERE auction_id = $1
+                     ORDER BY bid_amount_koinu DESC, created_at DESC",
+                    &[&auction_id],
+                )
+                .await
+                .map(|rows| rows.iter().map(marketplace_bid_row).collect::<Vec<_>>())
+                .unwrap_or_default();
+
+            let mut auction = marketplace_auction_row(&row);
+            if let Some(object) = auction.as_object_mut() {
+                object.insert("bids".to_string(), serde_json::Value::Array(bids));
+            }
+            Json(auction).into_response()
+        }
+        Ok(None) => marketplace_error(
+            StatusCode::NOT_FOUND,
+            "auction_not_found",
+            format!("Marketplace auction '{}' was not found", auction_id),
+        ),
+        Err(_) => marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to load marketplace auction",
+        ),
+    }
+}
+
+pub async fn list_marketplace_auctions(
+    State(state): State<AppState>,
+    Query(params): Query<MarketplaceFeedParams>,
+) -> Result<Json<MarketplaceListResponse<serde_json::Value>>, StatusCode> {
+    let client = state
+        .doginals_pool
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let offset = marketplace_offset(&params);
+    let min_price = marketplace_parse_optional_koinu(&params.min_price, "minPrice")
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let max_price = marketplace_parse_optional_koinu(&params.max_price, "maxPrice")
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let sort_sql = match params.sort.as_deref() {
+        Some("price_asc") => "start_price_koinu ASC, created_at DESC",
+        Some("price_desc") => "start_price_koinu DESC, created_at DESC",
+        Some("ending_soon") => "ends_at ASC, created_at DESC",
+        _ => "created_at DESC",
+    };
+
+    let count_row = client
+        .query_one(
+            "SELECT COUNT(*)::bigint
+             FROM marketplace_auctions
+             WHERE ($1::text IS NULL OR status = $1)
+               AND ($2::text IS NULL OR seller_address = $2)
+               AND ($3::text IS NULL OR inscription_id = $3)
+               AND ($4::bigint IS NULL OR start_price_koinu >= $4)
+               AND ($5::bigint IS NULL OR start_price_koinu <= $5)",
+            &[
+                &params.status,
+                &params.seller_address,
+                &params.inscription_id,
+                &min_price,
+                &max_price,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total: i64 = count_row.get(0);
+
+    let query = format!(
+        "SELECT id, inscription_id, seller_address, start_price_koinu,
+                reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                status, highest_bid_id, highest_bidder_address,
+                highest_bid_amount_koinu, highest_bid_placed_at
+         FROM marketplace_auctions
+         WHERE ($1::text IS NULL OR status = $1)
+           AND ($2::text IS NULL OR seller_address = $2)
+           AND ($3::text IS NULL OR inscription_id = $3)
+           AND ($4::bigint IS NULL OR start_price_koinu >= $4)
+           AND ($5::bigint IS NULL OR start_price_koinu <= $5)
+         ORDER BY {}
+         LIMIT $6 OFFSET $7",
+        sort_sql
+    );
+
+    let rows = client
+        .query(
+            &query,
+            &[
+                &params.status,
+                &params.seller_address,
+                &params.inscription_id,
+                &min_price,
+                &max_price,
+                &params.limit,
+                &offset,
+            ],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(MarketplaceListResponse {
+        items: rows.iter().map(marketplace_auction_row).collect(),
+        total: total.max(0) as usize,
+        next_cursor: marketplace_next_cursor(offset, params.limit, total),
+    }))
+}
+
+pub async fn create_marketplace_auction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateMarketplaceAuctionRequest>,
+) -> impl IntoResponse {
+    let idempotency_key = match marketplace_idempotency_key(&headers) {
+        Ok(key) => key,
+        Err(response) => return response,
+    };
+
+    let start_price_koinu =
+        match marketplace_parse_koinu(&body.start_price_koinu, "startPriceKoinu") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let reserve_price_koinu =
+        match marketplace_parse_optional_koinu(&body.reserve_price_koinu, "reservePriceKoinu") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let min_increment_koinu =
+        match marketplace_parse_koinu(&body.min_increment_koinu, "minIncrementKoinu") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let starts_at = match marketplace_parse_timestamp(&body.starts_at, "startsAt") {
+        Ok(timestamp) => timestamp,
+        Err(response) => return response,
+    };
+    let ends_at = match marketplace_parse_timestamp(&body.ends_at, "endsAt") {
+        Ok(timestamp) => timestamp,
+        Err(response) => return response,
+    };
+
+    if body.seller_address.trim().is_empty() || body.inscription_id.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_auction",
+            "sellerAddress and inscriptionId are required",
+        );
+    }
+    if ends_at <= starts_at {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_auction",
+            "endsAt must be later than startsAt",
+        );
+    }
+    if ends_at <= chrono::Utc::now() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_auction",
+            "endsAt must be in the future",
+        );
+    }
+    if reserve_price_koinu.is_some_and(|reserve| reserve < start_price_koinu) {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_auction",
+            "reservePriceKoinu cannot be lower than startPriceKoinu",
+        );
+    }
+
+    let anti_sniping_window_sec = body.anti_sniping_window_sec.unwrap_or(0);
+    let anti_sniping_extension_sec = body.anti_sniping_extension_sec.unwrap_or(0);
+    if anti_sniping_window_sec < 0 || anti_sniping_extension_sec < 0 {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_auction",
+            "Anti-sniping values must be zero or positive",
+        );
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) =
+        marketplace_require_session(&client, &headers, &body.seller_address).await
+    {
+        return response;
+    }
+
+    match client
+        .query_opt(
+            "SELECT id, inscription_id, seller_address, start_price_koinu,
+                    reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                    status, highest_bid_id, highest_bidder_address,
+                    highest_bid_amount_koinu, highest_bid_placed_at
+             FROM marketplace_auctions
+             WHERE idempotency_key = $1",
+            &[&idempotency_key],
+        )
+        .await
+    {
+        Ok(Some(row)) => return Json(marketplace_auction_row(&row)).into_response(),
+        Ok(None) => {}
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to check auction idempotency",
+            )
+        }
+    }
+
+    if marketplace_upsert_trader(&client, &body.seller_address)
+        .await
+        .is_err()
+    {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let auction_id = marketplace_id("auc");
+    let now = marketplace_now();
+    let status = if starts_at <= chrono::Utc::now() {
+        "live"
+    } else {
+        "scheduled"
+    };
+    let starts_at_text = starts_at.to_rfc3339();
+    let ends_at_text = ends_at.to_rfc3339();
+
+    let row = match client
+        .query_one(
+            "INSERT INTO marketplace_auctions (
+                 id, inscription_id, seller_address, start_price_koinu,
+                 reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                 status, anti_sniping_window_sec, anti_sniping_extension_sec,
+                 created_at, updated_at, idempotency_key
+             ) VALUES (
+                 $1, $2, $3, $4,
+                 $5, $6, $7, $8,
+                 $9, $10, $11,
+                 $12, $12, $13
+             )
+             RETURNING id, inscription_id, seller_address, start_price_koinu,
+                       reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                       status, highest_bid_id, highest_bidder_address,
+                       highest_bid_amount_koinu, highest_bid_placed_at",
+            &[
+                &auction_id,
+                &body.inscription_id,
+                &body.seller_address,
+                &start_price_koinu,
+                &reserve_price_koinu,
+                &min_increment_koinu,
+                &starts_at_text,
+                &ends_at_text,
+                &status,
+                &anti_sniping_window_sec,
+                &anti_sniping_extension_sec,
+                &now,
+                &idempotency_key,
+            ],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to create marketplace auction",
+            )
+        }
+    };
+
+    let activity_metadata = json!({
+        "reservePriceKoinu": reserve_price_koinu.map(|value| value.to_string()),
+        "antiSnipingWindowSec": anti_sniping_window_sec,
+        "antiSnipingExtensionSec": anti_sniping_extension_sec,
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &body.seller_address,
+        "auction_created",
+        "auction",
+        &auction_id,
+        Some(&body.inscription_id),
+        Some(start_price_koinu),
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    (StatusCode::CREATED, Json(marketplace_auction_row(&row))).into_response()
+}
+
+pub async fn create_marketplace_auction_bid(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(auction_id): Path<String>,
+    Json(body): Json<CreateMarketplaceBidRequest>,
+) -> impl IntoResponse {
+    let idempotency_key = match marketplace_idempotency_key(&headers) {
+        Ok(key) => key,
+        Err(response) => return response,
+    };
+    let bid_amount_koinu = match marketplace_parse_koinu(&body.bid_amount_koinu, "bidAmountKoinu") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    if body.bidder_address.trim().is_empty() {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_bid",
+            "bidderAddress is required",
+        );
+    }
+
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    match client
+        .query_opt(
+            "SELECT id, auction_id, bidder_address, bid_amount_koinu, status,
+                    bidder_signature_payload_hash, bidder_signature,
+                    bidder_signing_address, bidder_signed_at, created_at, updated_at
+             FROM marketplace_auction_bids
+             WHERE idempotency_key = $1",
+            &[&idempotency_key],
+        )
+        .await
+    {
+        Ok(Some(row)) => return Json(marketplace_bid_row(&row)).into_response(),
+        Ok(None) => {}
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to check auction bid idempotency",
+            )
+        }
+    }
+
+    let payload = match marketplace_verify_signed_intent(
+        &state,
+        &client,
+        &body.signed_intent,
+        "bid_place",
+        Some(&body.bidder_address),
+        true,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    if payload
+        .get("auctionId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != auction_id)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent auctionId does not match the request path",
+        );
+    }
+    if payload
+        .get("bidAmountKoinu")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != body.bid_amount_koinu)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent bidAmountKoinu does not match the request body",
+        );
+    }
+
+    let auction = match client
+        .query_opt(
+            "SELECT id, inscription_id, seller_address, start_price_koinu,
+                    reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                    status, highest_bid_id, highest_bidder_address,
+                    highest_bid_amount_koinu, highest_bid_placed_at,
+                    anti_sniping_window_sec, anti_sniping_extension_sec
+             FROM marketplace_auctions
+             WHERE id = $1",
+            &[&auction_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "auction_not_found",
+                format!("Marketplace auction '{}' was not found", auction_id),
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load marketplace auction",
+            )
+        }
+    };
+
+    let starts_at =
+        match marketplace_parse_timestamp(&auction.get::<_, String>("starts_at"), "startsAt") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let ends_at = match marketplace_parse_timestamp(&auction.get::<_, String>("ends_at"), "endsAt")
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let now_ts = chrono::Utc::now();
+    if now_ts < starts_at {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "auction_not_live",
+            "Auction has not started yet",
+        );
+    }
+    if now_ts >= ends_at {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "auction_ended",
+            "Auction has already ended",
+        );
+    }
+
+    let status: String = auction.get("status");
+    if matches!(status.as_str(), "settled" | "cancelled" | "invalidated") {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "auction_not_bidable",
+            format!("Auction cannot accept bids while in '{}' state", status),
+        );
+    }
+
+    let start_price_koinu: i64 = auction.get("start_price_koinu");
+    let min_increment_koinu: i64 = auction.get("min_increment_koinu");
+    let current_highest: Option<i64> = auction.get("highest_bid_amount_koinu");
+    let minimum_bid = current_highest
+        .map(|value| value + min_increment_koinu)
+        .unwrap_or(start_price_koinu);
+    if bid_amount_koinu < minimum_bid {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "bid_too_low",
+            format!("Bid must be at least {} koinu", minimum_bid),
+        );
+    }
+
+    if marketplace_upsert_trader(&client, &body.bidder_address)
+        .await
+        .is_err()
+    {
+        return marketplace_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            "Failed to prepare trader profile",
+        );
+    }
+
+    let current_highest_bid_id: Option<String> = auction.get("highest_bid_id");
+    if let Some(current_highest_bid_id) = current_highest_bid_id.as_ref() {
+        let _ = client
+            .execute(
+                "UPDATE marketplace_auction_bids
+                 SET status = 'outbid', updated_at = $2
+                 WHERE id = $1 AND status = 'winning'",
+                &[current_highest_bid_id, &marketplace_now()],
+            )
+            .await;
+    }
+
+    let anti_sniping_window_sec: i32 = auction.get("anti_sniping_window_sec");
+    let anti_sniping_extension_sec: i32 = auction.get("anti_sniping_extension_sec");
+    let extended_ends_at = if anti_sniping_window_sec > 0
+        && anti_sniping_extension_sec > 0
+        && (ends_at - now_ts).num_seconds() <= anti_sniping_window_sec as i64
+    {
+        ends_at + chrono::Duration::seconds(anti_sniping_extension_sec as i64)
+    } else {
+        ends_at
+    };
+
+    let bid_id = marketplace_id("bid");
+    let now = marketplace_now();
+    let row = match client
+        .query_one(
+            "INSERT INTO marketplace_auction_bids (
+                 id, auction_id, bidder_address, bid_amount_koinu, status,
+                 bidder_signature_payload_hash, bidder_signature,
+                 bidder_signing_address, bidder_signed_at, created_at, updated_at, idempotency_key
+             ) VALUES (
+                 $1, $2, $3, $4, 'winning',
+                 $5, $6,
+                 $7, $8, $9, $9, $10
+             )
+             RETURNING id, auction_id, bidder_address, bid_amount_koinu, status,
+                       bidder_signature_payload_hash, bidder_signature,
+                       bidder_signing_address, bidder_signed_at, created_at, updated_at",
+            &[
+                &bid_id,
+                &auction_id,
+                &body.bidder_address,
+                &bid_amount_koinu,
+                &body.signed_intent.payload_hash,
+                &body.signed_intent.signature,
+                &body.signed_intent.signing_address,
+                &body.signed_intent.signed_at,
+                &now,
+                &idempotency_key,
+            ],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to create marketplace bid",
+            )
+        }
+    };
+
+    let _ = client
+        .execute(
+            "UPDATE marketplace_auctions
+             SET status = 'live',
+                 highest_bid_id = $2,
+                 highest_bidder_address = $3,
+                 highest_bid_amount_koinu = $4,
+                 highest_bid_placed_at = $5,
+                 ends_at = $6,
+                 updated_at = $5
+             WHERE id = $1",
+            &[
+                &auction_id,
+                &bid_id,
+                &body.bidder_address,
+                &bid_amount_koinu,
+                &now,
+                &extended_ends_at.to_rfc3339(),
+            ],
+        )
+        .await;
+
+    let auction_inscription_id: String = auction.get("inscription_id");
+    let activity_metadata = json!({
+        "auctionId": auction_id,
+        "extendedEndsAt": extended_ends_at.to_rfc3339(),
+    });
+    let _ = marketplace_insert_activity(
+        &client,
+        &body.bidder_address,
+        "bid_placed",
+        "auction",
+        &auction_id,
+        Some(&auction_inscription_id),
+        Some(bid_amount_koinu),
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    Json(json!({
+        "bid": marketplace_bid_row(&row),
+        "auctionId": auction_id,
+        "endsAt": extended_ends_at.to_rfc3339(),
+    }))
+    .into_response()
+}
+
+pub async fn cancel_marketplace_auction_bid(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((auction_id, bid_id)): Path<(String, String)>,
+    Json(body): Json<CancelMarketplaceBidRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    if let Err(response) =
+        marketplace_require_session(&client, &headers, &body.bidder_address).await
+    {
+        return response;
+    }
+
+    let bid = match client
+        .query_opt(
+            "SELECT id, auction_id, bidder_address, bid_amount_koinu, status,
+                    bidder_signature_payload_hash, bidder_signature,
+                    bidder_signing_address, bidder_signed_at, created_at, updated_at
+             FROM marketplace_auction_bids
+             WHERE id = $1 AND auction_id = $2",
+            &[&bid_id, &auction_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "bid_not_found",
+                "Marketplace bid was not found",
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load marketplace bid",
+            )
+        }
+    };
+
+    let bidder_address: String = bid.get("bidder_address");
+    if bidder_address != body.bidder_address {
+        return marketplace_error(
+            StatusCode::FORBIDDEN,
+            "bid_cancel_forbidden",
+            "bidderAddress does not match the bid owner",
+        );
+    }
+
+    let bid_status: String = bid.get("status");
+    if !matches!(bid_status.as_str(), "winning" | "active" | "outbid") {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "bid_not_cancellable",
+            format!("Bid cannot be cancelled while in '{}' state", bid_status),
+        );
+    }
+
+    let now = marketplace_now();
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_auction_bids
+             SET status = 'withdrawn', updated_at = $3
+             WHERE id = $1 AND auction_id = $2
+             RETURNING id, auction_id, bidder_address, bid_amount_koinu, status,
+                       bidder_signature_payload_hash, bidder_signature,
+                       bidder_signing_address, bidder_signed_at, created_at, updated_at",
+            &[&bid_id, &auction_id, &now],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to cancel marketplace bid",
+            )
+        }
+    };
+
+    let replacement = client
+        .query_opt(
+            "SELECT id, bidder_address, bid_amount_koinu, created_at
+             FROM marketplace_auction_bids
+             WHERE auction_id = $1 AND status IN ('winning', 'outbid')
+             ORDER BY bid_amount_koinu DESC, created_at DESC
+             LIMIT 1",
+            &[&auction_id],
+        )
+        .await
+        .ok()
+        .flatten();
+
+    if let Some(replacement) = replacement {
+        let replacement_id: String = replacement.get("id");
+        let replacement_bidder_address: String = replacement.get("bidder_address");
+        let replacement_bid_amount_koinu: i64 = replacement.get("bid_amount_koinu");
+        let replacement_created_at: String = replacement.get("created_at");
+
+        let _ = client
+            .execute(
+                "UPDATE marketplace_auction_bids
+                 SET status = 'winning', updated_at = $2
+                 WHERE id = $1",
+                &[&replacement_id, &now],
+            )
+            .await;
+        let _ = client
+            .execute(
+                "UPDATE marketplace_auctions
+                 SET highest_bid_id = $2,
+                     highest_bidder_address = $3,
+                     highest_bid_amount_koinu = $4,
+                     highest_bid_placed_at = $5,
+                     updated_at = $6
+                 WHERE id = $1",
+                &[
+                    &auction_id,
+                    &replacement_id,
+                    &replacement_bidder_address,
+                    &replacement_bid_amount_koinu,
+                    &replacement_created_at,
+                    &now,
+                ],
+            )
+            .await;
+    } else {
+        let _ = client
+            .execute(
+                "UPDATE marketplace_auctions
+                 SET highest_bid_id = NULL,
+                     highest_bidder_address = NULL,
+                     highest_bid_amount_koinu = NULL,
+                     highest_bid_placed_at = NULL,
+                     updated_at = $2
+                 WHERE id = $1",
+                &[&auction_id, &now],
+            )
+            .await;
+    }
+
+    let activity_metadata = json!({ "bidId": bid_id });
+    let _ = marketplace_insert_activity(
+        &client,
+        &body.bidder_address,
+        "bid_withdrawn",
+        "auction",
+        &auction_id,
+        None,
+        None,
+        None,
+        Some(&activity_metadata),
+    )
+    .await;
+
+    Json(marketplace_bid_row(&row)).into_response()
+}
+
+pub async fn settle_marketplace_auction(
+    State(state): State<AppState>,
+    Path(auction_id): Path<String>,
+    Json(body): Json<SettleMarketplaceAuctionRequest>,
+) -> impl IntoResponse {
+    let client = match state.doginals_pool.get().await {
+        Ok(client) => client,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_unavailable",
+                "Marketplace database unavailable",
+            )
+        }
+    };
+
+    let payload = match marketplace_verify_signed_intent(
+        &state,
+        &client,
+        &body.signed_intent,
+        "auction_settle",
+        Some(&body.seller_address),
+        true,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    if payload
+        .get("auctionId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value != auction_id)
+    {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_intent",
+            "Intent auctionId does not match the request path",
+        );
+    }
+
+    let auction = match client
+        .query_opt(
+            "SELECT id, inscription_id, seller_address, ends_at, status,
+                    highest_bid_id, highest_bid_amount_koinu
+             FROM marketplace_auctions
+             WHERE id = $1",
+            &[&auction_id],
+        )
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return marketplace_error(
+                StatusCode::NOT_FOUND,
+                "auction_not_found",
+                format!("Marketplace auction '{}' was not found", auction_id),
+            )
+        }
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to load marketplace auction",
+            )
+        }
+    };
+
+    let seller_address: String = auction.get("seller_address");
+    if seller_address != body.seller_address {
+        return marketplace_error(
+            StatusCode::FORBIDDEN,
+            "auction_settle_forbidden",
+            "sellerAddress does not match the auction owner",
+        );
+    }
+
+    let ends_at = match marketplace_parse_timestamp(&auction.get::<_, String>("ends_at"), "endsAt")
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if chrono::Utc::now() < ends_at {
+        return marketplace_error(
+            StatusCode::CONFLICT,
+            "auction_not_ended",
+            "Auction cannot be settled before it has ended",
+        );
+    }
+
+    let highest_bid_id: Option<String> = auction.get("highest_bid_id");
+    let highest_bid_amount_koinu: Option<i64> = auction.get("highest_bid_amount_koinu");
+    let highest_bid_id = match highest_bid_id {
+        Some(highest_bid_id) => highest_bid_id,
+        None => {
+            return marketplace_error(
+                StatusCode::CONFLICT,
+                "auction_no_bids",
+                "Auction has no winning bid to settle",
+            )
+        }
+    };
+    let highest_bid_amount_koinu = highest_bid_amount_koinu.unwrap_or(0);
+
+    let transaction = match marketplace_decode_raw_transaction(&body.signed_psbt) {
+        Ok(transaction) => transaction,
+        Err(response) => return response,
+    };
+    let seller_script = match marketplace_parse_dogecoin_address(&seller_address) {
+        Ok(script) => script,
+        Err(response) => return response,
+    };
+    let seller_paid_koinu = marketplace_output_value_for_script(&transaction, &seller_script);
+    if seller_paid_koinu < highest_bid_amount_koinu {
+        return marketplace_error(
+            StatusCode::BAD_REQUEST,
+            "insufficient_payment",
+            format!(
+                "Transaction pays {} koinu to seller but auction requires {}",
+                seller_paid_koinu, highest_bid_amount_koinu
+            ),
+        );
+    }
+
+    let txid = match marketplace_broadcast_raw_transaction(&state, &body.signed_psbt).await {
+        Ok(txid) => txid,
+        Err(response) => return response,
+    };
+    let now = marketplace_now();
+    let txid_string = txid.clone();
+    let auction_inscription_id: String = auction.get("inscription_id");
+    let settle_metadata = json!({ "bidId": highest_bid_id });
+
+    let row = match client
+        .query_one(
+            "UPDATE marketplace_auctions
+             SET status = 'settled', updated_at = $2
+             WHERE id = $1
+             RETURNING id, inscription_id, seller_address, start_price_koinu,
+                       reserve_price_koinu, min_increment_koinu, starts_at, ends_at,
+                       status, highest_bid_id, highest_bidder_address,
+                       highest_bid_amount_koinu, highest_bid_placed_at",
+            &[&auction_id, &now],
+        )
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => {
+            return marketplace_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                "Failed to settle marketplace auction",
+            )
+        }
+    };
+
+    let _ = client
+        .execute(
+            "UPDATE marketplace_auction_bids
+             SET status = 'settled', settlement_txid = $3, updated_at = $4
+             WHERE id = $1 AND auction_id = $2",
+            &[&highest_bid_id, &auction_id, &txid_string, &now],
+        )
+        .await;
+
+    let _ = marketplace_insert_activity(
+        &client,
+        &seller_address,
+        "auction_settled",
+        "auction",
+        &auction_id,
+        Some(&auction_inscription_id),
+        Some(highest_bid_amount_koinu),
+        Some(&txid_string),
+        Some(&settle_metadata),
+    )
+    .await;
+
+    Json(json!({
+        "auction": marketplace_auction_row(&row),
+        "txid": txid_string,
+        "status": "settled",
+    }))
+    .into_response()
+}

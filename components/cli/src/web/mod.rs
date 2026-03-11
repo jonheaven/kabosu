@@ -61,8 +61,14 @@ pub async fn start_web_server(
         .route("/api/dns/names", get(get_dns_names))
         .route("/api/dogemap/claims", get(get_dogemap_claims))
         .route("/api/dogetags", get(get_dogetags))
-        .route("/dogespells/balance/:ticker/:address", get(get_dogespells_balance))
-        .route("/dogespells/history/:ticker/:address", get(get_dogespells_history))
+        .route(
+            "/dogespells/balance/:ticker/:address",
+            get(get_dogespells_balance),
+        )
+        .route(
+            "/dogespells/history/:ticker/:address",
+            get(get_dogespells_history),
+        )
         .route("/dogespells/spells/:txid", get(get_dogespells_spells))
         .route("/api/status", get(get_status))
         .route("/api/decode", get(decode_inscription))
@@ -82,6 +88,69 @@ pub async fn start_web_server(
         .route("/openapi.json", get(openapi_spec))
         // Health check
         .route("/health", get(health_check))
+        // Marketplace API scaffolding
+        .route(
+            "/v1/auth/challenge",
+            post(create_marketplace_auth_challenge),
+        )
+        .route("/v1/auth/verify", post(verify_marketplace_auth_challenge))
+        .route("/v1/system/health", get(marketplace_health))
+        .route("/v1/system/sync", get(marketplace_sync))
+        .route(
+            "/v1/listings",
+            get(list_marketplace_listings).post(create_marketplace_listing),
+        )
+        .route("/v1/listings/:listing_id", get(get_marketplace_listing))
+        .route(
+            "/v1/listings/:listing_id/cancel",
+            post(cancel_marketplace_listing),
+        )
+        .route(
+            "/v1/orders/:listing_id/build",
+            post(build_marketplace_order),
+        )
+        .route(
+            "/v1/orders/:listing_id/submit",
+            post(submit_marketplace_order),
+        )
+        .route("/v1/tx/:txid/status", get(get_marketplace_tx_status))
+        .route(
+            "/v1/offers",
+            get(list_marketplace_offers).post(create_marketplace_offer),
+        )
+        .route(
+            "/v1/offers/:offer_id/cancel",
+            post(cancel_marketplace_offer),
+        )
+        .route(
+            "/v1/auctions",
+            get(list_marketplace_auctions).post(create_marketplace_auction),
+        )
+        .route("/v1/auctions/:auction_id", get(get_marketplace_auction))
+        .route(
+            "/v1/auctions/:auction_id/bids",
+            post(create_marketplace_auction_bid),
+        )
+        .route(
+            "/v1/auctions/:auction_id/bids/:bid_id/cancel",
+            post(cancel_marketplace_auction_bid),
+        )
+        .route(
+            "/v1/auctions/:auction_id/settle",
+            post(settle_marketplace_auction),
+        )
+        .route(
+            "/v1/traders/:address",
+            get(get_marketplace_trader).patch(update_marketplace_trader),
+        )
+        .route(
+            "/v1/traders/:address/x/verify",
+            post(verify_marketplace_trader_x),
+        )
+        .route(
+            "/v1/traders/:address/activity",
+            get(get_marketplace_trader_activity),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -370,4 +439,3 @@ async fn openapi_spec() -> impl IntoResponse {
         ]
     }))
 }
-
