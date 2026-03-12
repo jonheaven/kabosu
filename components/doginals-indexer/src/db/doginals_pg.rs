@@ -1373,6 +1373,7 @@ pub struct LottoTicketRow {
     pub minted_height: u64,
     pub minted_timestamp: u64,
     pub seed_numbers: Vec<u16>,
+    pub luck_marks: Option<Vec<u16>>,
     pub tip_percent: u8,
     pub fingerprint: Option<String>,
     pub classic_numbers: Vec<u16>,
@@ -1399,6 +1400,7 @@ struct StoredTicketRow {
     inscription_id: String,
     ticket_id: String,
     seed_numbers: Vec<u16>,
+    luck_marks: Option<Vec<u16>>,
     minted_height: u64,
     tip_percent: u8,
     fingerprint: Option<String>,
@@ -1528,8 +1530,8 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
             .query_opt(
                 "INSERT INTO dogelotto_tickets (
                           inscription_id, lotto_id, ticket_id, tx_id, minted_height, minted_timestamp,
-                          seed_numbers, tip_percent, fingerprint, classic_numbers
-                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                          seed_numbers, luck_marks, tip_percent, fingerprint, classic_numbers
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                  ON CONFLICT DO NOTHING
                  RETURNING inscription_id",
                 &[
@@ -1540,6 +1542,11 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
                     &(minted_height as i64),
                     &(minted_timestamp as i64),
                     &seed_numbers,
+                    &parsed
+                        .mint
+                        .luck_marks
+                        .as_ref()
+                        .map(|marks| seed_numbers_to_i32(marks)),
                     &(parsed.mint.tip_percent as i32),
                     &fingerprint_opt,
                     &classic_numbers_i32,
@@ -1557,6 +1564,7 @@ pub async fn insert_lotto_tickets<T: GenericClient>(
                 minted_height,
                 minted_timestamp: minted_timestamp as u64,
                 seed_numbers: parsed.mint.seed_numbers.clone(),
+                luck_marks: parsed.mint.luck_marks.clone(),
                 tip_percent: parsed.mint.tip_percent,
                 fingerprint: fingerprint_opt,
                 classic_numbers,
@@ -1873,6 +1881,7 @@ pub struct LottoTicketCardRow {
     pub minted_height: u64,
     pub minted_timestamp: u64,
     pub seed_numbers: Vec<u16>,
+    pub luck_marks: Option<Vec<u16>>,
     pub tip_percent: u8,
 }
 
@@ -1945,7 +1954,7 @@ pub async fn list_lotto_tickets<T: GenericClient>(
 ) -> Result<Vec<LottoTicketCardRow>, String> {
     let rows = client
         .query(
-            "SELECT inscription_id, lotto_id, ticket_id, tx_id, minted_height, minted_timestamp, seed_numbers, tip_percent
+            "SELECT inscription_id, lotto_id, ticket_id, tx_id, minted_height, minted_timestamp, seed_numbers, luck_marks, tip_percent
              FROM dogelotto_tickets
              WHERE lotto_id = $1
              ORDER BY minted_height DESC, inscription_id DESC
@@ -1969,7 +1978,10 @@ pub async fn list_lotto_tickets<T: GenericClient>(
                 .into_iter()
                 .map(|v| v as u16)
                 .collect(),
-            tip_percent: r.get::<_, i32>(7) as u8,
+            luck_marks: r
+                .get::<_, Option<Vec<i32>>>(7)
+                .map(|marks| marks.into_iter().map(|v| v as u16).collect()),
+            tip_percent: r.get::<_, i32>(8) as u8,
         })
         .collect())
 }
@@ -2051,7 +2063,7 @@ async fn get_lotto_tickets_for_resolution<T: GenericClient>(
 ) -> Result<Vec<StoredTicketRow>, String> {
     let rows = client
         .query(
-            "SELECT inscription_id, ticket_id, seed_numbers, minted_height, tip_percent,
+            "SELECT inscription_id, ticket_id, seed_numbers, luck_marks, minted_height, tip_percent,
                     fingerprint, classic_numbers
              FROM dogelotto_tickets
              WHERE lotto_id = $1 AND minted_height <= $2
@@ -2069,6 +2081,10 @@ async fn get_lotto_tickets_for_resolution<T: GenericClient>(
                 inscription_id: row.get("inscription_id"),
                 ticket_id: row.get("ticket_id"),
                 seed_numbers: i32_seed_numbers_to_u16(seed_numbers)?,
+                luck_marks: row
+                    .get::<_, Option<Vec<i32>>>("luck_marks")
+                    .map(i32_seed_numbers_to_u16)
+                    .transpose()?,
                 minted_height: row.get::<_, i64>("minted_height") as u64,
                 tip_percent: row.get::<_, i32>("tip_percent") as u8,
                 fingerprint: row.get("fingerprint"),

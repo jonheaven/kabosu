@@ -735,13 +735,15 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     return Err("lotto mint requires either --quickpick or --seed-numbers".into());
                 };
                 let ticket_id = cmd.ticket_id.clone().unwrap_or_else(generate_ticket_id);
+                let is_deno = cmd.lotto_id == "deno";
 
                 let payload = serde_json::json!({
                     "p": "DogeLotto",
                     "op": "mint",
                     "lotto_id": cmd.lotto_id,
                     "ticket_id": ticket_id,
-                    "seed_numbers": seed_numbers,
+                    "seed_numbers": if is_deno { serde_json::Value::Null } else { serde_json::json!(seed_numbers.clone()) },
+                    "luck_marks": if is_deno { serde_json::json!(seed_numbers.clone()) } else { serde_json::Value::Null },
                     "tip_percent": cmd.tip,
                 });
                 let payload = compact_json_without_nulls(payload)?;
@@ -763,6 +765,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                             "lotto_id": cmd.lotto_id,
                             "ticket_id": ticket_id,
                             "seed_numbers": seed_numbers,
+                            "luck_marks": if is_deno { Some(seed_numbers.clone()) } else { None::<Vec<u16>> },
                             "payload": payload,
                             "payment": {
                                 "address": status.summary.prize_pool_address,
@@ -1502,6 +1505,13 @@ fn lotto_number_defaults(lotto_id: &str) -> LottoNumberDefaults {
             main_max: 20,
             bonus_pick: 3,
             bonus_max: 20,
+        },
+        "deno" => LottoNumberDefaults {
+            template: "closest_wins",
+            main_pick: 10,
+            main_max: 80,
+            bonus_pick: 0,
+            bonus_max: 0,
         },
         _ => LottoNumberDefaults {
             template: "closest_wins",

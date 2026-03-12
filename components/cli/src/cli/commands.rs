@@ -216,7 +216,7 @@ pub enum LottoCommand {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct LottoDeployCommand {
-    /// Lotto identifier to deploy (e.g. doge-69-420, doge-max, my-mini-lotto-abc)
+    /// Lotto identifier to deploy (e.g. doge-69-420, doge-max, deno, my-mini-lotto-abc)
     #[clap(long = "type")]
     pub lotto_id: String,
     /// Future draw block height
@@ -272,7 +272,7 @@ pub struct LottoMintCommand {
     /// Optional ticket id. Defaults to a generated id.
     #[clap(long)]
     pub ticket_id: Option<String>,
-    /// Generate random unique numbers matching the deploy main drum config
+    /// Generate random unique numbers matching the deploy main drum config (Luck Marks for deno)
     #[clap(long)]
     pub quickpick: bool,
     /// Comma-separated seed numbers. Must match deploy main drum pick/max constraints.

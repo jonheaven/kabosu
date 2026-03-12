@@ -14,7 +14,7 @@
   </style>
 </head>
 <body>
-  <h1>Kabosu Explorer — Lotto</h1>
+  <h1>Kabosu Explorer — Lucky Ðraw</h1>
   <div style="margin-bottom:.75rem; display:flex; gap:.5rem; align-items:center;">
     <label for="walletAddress">Wallet Address:</label>
     <input id="walletAddress" placeholder="D..." style="min-width:360px;" />
@@ -39,6 +39,7 @@
         lotto_id: ticket.lotto_id,
         ticket_id: ticket.ticket_id,
         seed_numbers: ticket.seed_numbers,
+        luck_marks: ticket.luck_marks || (ticket.lotto_id === "deno" ? ticket.seed_numbers : null),
         minted_height: ticket.minted_height
       };
       const asJson = JSON.stringify(payload);
@@ -59,11 +60,11 @@
         <style>body{font-family:sans-serif;padding:16px}.qr{margin:10px 0}</style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
         </head><body>
-          <h2>Lotto Ticket</h2>
+          <h2>Lucky Ðraw Ticket</h2>
           <div><strong>Lotto:</strong> ${ticket.lotto_id}</div>
           <div><strong>Ticket:</strong> ${ticket.ticket_id}</div>
           <div><strong>Inscription:</strong> ${ticket.inscription_id}</div>
-          <div><strong>Seed Numbers:</strong> ${(ticket.seed_numbers || []).join(', ')}</div>
+          <div><strong>${ticket.lotto_id === "deno" ? "Luck Marks" : "Seed Numbers"}:</strong> ${((ticket.luck_marks||ticket.seed_numbers) || []).join(', ')}</div>
           <div id="printQr" class="qr"></div>
           <script>
             new QRCode(document.getElementById('printQr'), { text: ${JSON.stringify(qrText)}, width: 220, height: 220 });
@@ -130,7 +131,7 @@
               <div><strong>Lotto:</strong> ${ticket.lotto_id}</div>
               <div><strong>Ticket:</strong> ${ticket.ticket_id}</div>
               <div><strong>Inscription:</strong> ${ticket.inscription_id}</div>
-              <div><strong>Seed:</strong> ${(ticket.seed_numbers || []).join(', ')}</div>
+              <div><strong>${ticket.lotto_id === "deno" ? "Luck Marks" : "Seed"}:</strong> ${((ticket.luck_marks||ticket.seed_numbers) || []).join(', ')}</div>
               <div class="actions">
                 <button data-print="1">Print Ticket</button>
                 <button data-burn="1">Burn Ticket</button>

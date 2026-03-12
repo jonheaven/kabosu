@@ -52,14 +52,24 @@ Run a dedicated DogeLotto-only sync:
 kabosu doginals index sync --only dogelotto --config-path kabosu.toml
 ```
 
+#### Lucky Ðraw → Ðeno (Keno-style)
+
+- Players draw **Luck Marks**: pick `1-20` unique numbers from `1-80` by default (deploy-time configurable via `main_numbers.pick` and `main_numbers.max`).
+- Designed for low activity: frequent draws are recommended (`100-500` blocks), small ticket price defaults, and broad winner coverage.
+- Use `closest_wins` (default) for competitive scoring, or `always_winner` so at least one ticket receives payout each draw.
+- Prize tiers naturally scale with participation: early draws stay fun with small pools, larger draws increase payout competitiveness.
+- `kabosu lotto mint --lotto deno --quickpick` generates random Luck Marks and writes them into mint JSON as `luck_marks` (while retaining backward-compatible `seed_numbers` handling in the indexer).
+
 Example deploy payload with explicit ticket cutoff (if omitted, defaults to `draw_block - 10`):
+
+> Branding hierarchy: ecosystem = **Lucky Ðraw**, game = **Ðeno**, ticket mechanic = **Luck Marks**.
 
 ```bash
 kabosu lotto deploy \
-   --type doge-69-420 \
+   --type deno \
    --draw-block 6200000 \
    --cutoff-block 6199990 \
-   --ticket-price-koinu 100000000 \
+   --ticket-price-koinu 1000000 \
    --prize-pool-address Dxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
    --fee-percent 0 \
    --resolution-mode closest_wins \
@@ -82,7 +92,7 @@ Example mint with a 5% immutable tip:
 
 ```bash
 kabosu lotto mint \
-   --lotto doge-69-420 \
+   --lotto deno \
    --quickpick \
    --tip 5 \
    --config-path kabosu.toml

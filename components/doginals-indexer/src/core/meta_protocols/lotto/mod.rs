@@ -101,6 +101,7 @@ pub struct LottoMint {
     pub lotto_id: String,
     pub ticket_id: String,
     pub seed_numbers: Vec<u16>,
+    pub luck_marks: Option<Vec<u16>>,
     pub tip_percent: u8,
 }
 
@@ -129,6 +130,7 @@ struct RawMint {
     lotto_id: Option<String>,
     ticket_id: Option<String>,
     seed_numbers: Option<Vec<u16>>,
+    luck_marks: Option<Vec<u16>>,
     tip_percent: Option<u8>,
 }
 
@@ -199,7 +201,17 @@ pub fn try_parse_lotto_mint(body: &[u8]) -> Option<LottoMint> {
 
     let lotto_id = normalize_lotto_id(raw.lotto_id?)?;
     let ticket_id = normalize_ticket_id(raw.ticket_id?)?;
-    let seed_numbers = normalize_seed_numbers(raw.seed_numbers?, GLOBAL_NUMBER_MAX)?;
+    let luck_marks = raw
+        .luck_marks
+        .map(|numbers| normalize_seed_numbers(numbers, GLOBAL_NUMBER_MAX))
+        .transpose()?;
+    let seed_numbers = if let Some(seed_numbers) = raw.seed_numbers {
+        normalize_seed_numbers(seed_numbers, GLOBAL_NUMBER_MAX)?
+    } else if let Some(luck_marks) = &luck_marks {
+        luck_marks.clone()
+    } else {
+        return None;
+    };
     let tip_percent = raw.tip_percent.unwrap_or(0);
     if tip_percent > 10 {
         return None;
@@ -209,6 +221,7 @@ pub fn try_parse_lotto_mint(body: &[u8]) -> Option<LottoMint> {
         lotto_id,
         ticket_id,
         seed_numbers,
+        luck_marks,
         tip_percent,
     })
 }
@@ -430,7 +443,10 @@ fn normalize_prize_pool_address(address: String) -> Option<String> {
     if address.len() < 24 || address.len() > 128 {
         return None;
     }
-    if address.chars().any(|c| c.is_ascii_whitespace() || c.is_ascii_control()) {
+    if address
+        .chars()
+        .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
+    {
         return None;
     }
     Some(address.to_string())
@@ -489,9 +505,9 @@ fn validate_seed_numbers_for_config(seed_numbers: &[u16], config: &NumberConfig)
     }
 
     let mut seen = HashSet::with_capacity(seed_numbers.len());
-    seed_numbers.iter().all(|number| {
-        (GLOBAL_NUMBER_MIN..=config.max).contains(number) && seen.insert(*number)
-    })
+    seed_numbers
+        .iter()
+        .all(|number| (GLOBAL_NUMBER_MIN..=config.max).contains(number) && seen.insert(*number))
 }
 
 fn template_matches_config(
