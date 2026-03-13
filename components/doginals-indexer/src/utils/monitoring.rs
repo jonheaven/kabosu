@@ -57,6 +57,13 @@ pub struct PrometheusMonitoring {
     pub blocks_indexed_via_file: UInt64Gauge,
     pub blocks_indexed_via_rpc: UInt64Gauge,
 
+    // Cache and throughput metrics
+    pub cache_hit_rate: UInt64Gauge,
+    pub db_latency_ms: UInt64Gauge,
+    pub dynamic_batch_size: UInt64Gauge,
+    pub inserts_per_sec: UInt64Gauge,
+    pub blocks_per_sec: UInt64Gauge,
+
     // Registry
     pub registry: Registry,
 }
@@ -176,6 +183,32 @@ impl PrometheusMonitoring {
             "Total blocks indexed using JSON-RPC.",
         );
 
+        let cache_hit_rate = Self::create_and_register_uint64_gauge(
+            &registry,
+            "cache_hit_rate",
+            "Inscription cache hit rate percentage.",
+        );
+        let db_latency_ms = Self::create_and_register_uint64_gauge(
+            &registry,
+            "db_latency_ms",
+            "Database lookup latency in milliseconds.",
+        );
+        let dynamic_batch_size = Self::create_and_register_uint64_gauge(
+            &registry,
+            "dynamic_batch_size",
+            "Current dynamic batch size for inserts.",
+        );
+        let inserts_per_sec = Self::create_and_register_uint64_gauge(
+            &registry,
+            "inserts_per_sec",
+            "Current insert throughput per second.",
+        );
+        let blocks_per_sec = Self::create_and_register_uint64_gauge(
+            &registry,
+            "blocks_per_sec",
+            "Current block processing throughput per second.",
+        );
+
         // BRC-20 specific metrics in total
         let drc20_deploy_operations_total = Self::create_and_register_uint64_gauge(
             &registry,
@@ -201,6 +234,11 @@ impl PrometheusMonitoring {
         PrometheusMonitoring {
             blocks_indexed_via_file,
             blocks_indexed_via_rpc,
+            cache_hit_rate,
+            db_latency_ms,
+            dynamic_batch_size,
+            inserts_per_sec,
+            blocks_per_sec,
             last_indexed_block_height,
             last_indexed_inscription_number,
             last_classic_indexed_blessed_inscription_number,
@@ -397,6 +435,26 @@ impl PrometheusMonitoring {
     }
     pub fn metrics_add_rpc_blocks(&self, count: u64) {
         self.blocks_indexed_via_rpc.add(count);
+    }
+
+    pub fn metrics_record_cache_hit_rate(&self, rate_percent: u64) {
+        self.cache_hit_rate.set(rate_percent);
+    }
+
+    pub fn metrics_record_db_latency_ms(&self, latency_ms: u64) {
+        self.db_latency_ms.set(latency_ms);
+    }
+
+    pub fn metrics_record_dynamic_batch_size(&self, batch_size: u64) {
+        self.dynamic_batch_size.set(batch_size);
+    }
+
+    pub fn metrics_record_inserts_per_sec(&self, inserts: u64) {
+        self.inserts_per_sec.set(inserts);
+    }
+
+    pub fn metrics_record_blocks_per_sec(&self, blocks: u64) {
+        self.blocks_per_sec.set(blocks);
     }
 
     // BRC-20 specific metrics methods in total
