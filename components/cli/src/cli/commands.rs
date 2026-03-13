@@ -259,6 +259,9 @@ pub struct LottoDeployCommand {
     /// Optional guaranteed minimum prize in koinu
     #[clap(long)]
     pub guaranteed_min_prize_koinu: Option<u64>,
+    /// Emit compact short-key JSON payload
+    #[clap(long, default_value_t = true)]
+    pub minify: bool,
     /// Output as JSON wrapper instead of raw inscription payload
     #[clap(long)]
     pub json: bool,
@@ -283,6 +286,9 @@ pub struct LottoMintCommand {
     pub tip: u8,
     #[clap(long = "config-path")]
     pub config_path: String,
+    /// Emit compact short-key JSON payload
+    #[clap(long, default_value_t = true)]
+    pub minify: bool,
     /// Output the broadcast result as JSON
     #[clap(long)]
     pub json: bool,
