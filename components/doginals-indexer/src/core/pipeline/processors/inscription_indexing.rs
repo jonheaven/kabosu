@@ -18,6 +18,7 @@ use fxhash::FxHasher;
 use postgres::{pg_begin, pg_pool_client};
 
 use crate::{
+    cache::INSCRIPTION_CACHE,
     core::{
         meta_protocols::{
             dogespells::{identity_hex, try_parse_dogespells_spell, IndexedDogeSpellsSpell},
@@ -938,18 +939,31 @@ async fn detect_lotto_burns<T: deadpool_postgres::GenericClient>(
                     let owner_address = if let Some(owner_row) = owner_query {
                         owner_row.get::<_, String>(0)
                     } else {
-                        // Fallback: genesis address from inscriptions table
-                        let genesis_query = client
-                            .query_opt(
-                                "SELECT address FROM inscriptions WHERE inscription_id = $1",
-                                &[&inscription_id],
-                            )
-                            .await
-                            .map_err(|e| format!("detect_lotto_burns (get genesis): {e}"))?;
-                        if let Some(g) = genesis_query {
-                            g.get(0)
+                        if let Some(cached_entry) = INSCRIPTION_CACHE.get(&inscription_id) {
+                            cached_entry
+                                .get("address")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or_default()
+                                .to_string()
                         } else {
-                            continue; // Skip if we can't find owner
+                            // Fallback: genesis address from inscriptions table
+                            let genesis_query = client
+                                .query_opt(
+                                    "SELECT address FROM inscriptions WHERE inscription_id = $1",
+                                    &[&inscription_id],
+                                )
+                                .await
+                                .map_err(|e| format!("detect_lotto_burns (get genesis): {e}"))?;
+                            if let Some(g) = genesis_query {
+                                let address: String = g.get(0);
+                                INSCRIPTION_CACHE.insert(
+                                    inscription_id.clone(),
+                                    serde_json::json!({ "address": address }),
+                                );
+                                address
+                            } else {
+                                continue; // Skip if we can't find owner
+                            }
                         }
                     };
 
