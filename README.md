@@ -2,7 +2,7 @@
 [<img alt="Docs" src="https://img.shields.io/docsrs/doge-lotto">](https://docs.rs/doge-lotto)
 [<img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg">](LICENSE)
 [<img alt="DogeLotto" src="https://img.shields.io/badge/DogeLotto-official_standard-blue">](https://github.com/jonheaven/doge-lotto)
-
+# kabosu — Dogecoin Doginals Indexer
 # kabosu — Dogecoin Indexer
 
 The fastest, lightest, most selective Doginals indexer for Dogecoin.
@@ -10,12 +10,6 @@ Backward-traversal + reorg-safe (Chainhook engine) + Hiro-style predicate filter
 
 ## dog vs kabosu
 
-| | **dog** | **kabosu** |
-|---|---|---|
-| Purpose | Full explorer / CLI / wallet | Blazing predicate backend + real-time hooks |
-| Storage | redb (embedded, single-process) | Postgres (multi-client, production-grade) |
-| Traversal | Forward (carry koinu ranges forward) | Backward (trace to coinbase on reveal) |
-| Reorg safety | Manual | Automatic ZMQ apply/rollback |
 | Selective indexing | No | Yes — MIME type + content prefix predicates |
 | DNS / Dogemap / DogeLotto | Query only | Indexed natively, queryable via CLI + webhooks |
 | Real-time hooks | No | Yes — POST JSON on every DNS/Dogemap event |
@@ -49,11 +43,6 @@ Both projects are completely independent codebases. kabosu does not import dog.
 
 This lets the indexer verify payment and tip commitments trustlessly.
 
-Run a dedicated DogeLotto-only sync:
-
-```bash
-kabosu doginals index sync --only dogelotto --config-path kabosu.toml
-```
 
 #### Lucky Ðraw → Ðeno (Keno-style)
 

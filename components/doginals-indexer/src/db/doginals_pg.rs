@@ -19,11 +19,12 @@ use super::models::{
     DbLocation,
 };
 use crate::core::meta_protocols::dogespells::{identity_hex, IndexedDogeSpellsSpell};
-use crate::core::meta_protocols::lotto::{
+
+use doge_lotto::{
     classic_prize_bps, compute_ticket_fingerprint, count_classic_matches,
-    derive_classic_drawn_numbers, derive_classic_numbers, derive_draw_for_deploy, score_ticket,
-    u256_abs_diff, validate_mint_against_deploy, LottoDeploy, LottoDraw, LottoTemplate,
-    NumberConfig, ResolutionMode, FINGERPRINT_TIER_BPS,
+    derive_classic_drawn_numbers, derive_classic_numbers, score_ticket,
+    u256_abs_diff, validate_mint_against_deploy,
+    LottoDeploy, LottoTemplate, NumberConfig, ResolutionMode, FINGERPRINT_TIER_BPS, LottoDraw, derive_draw_for_deploy,
 };
 use crate::core::protocol::{
     inscription_parsing::{ParsedLottoDeploy, ParsedLottoMint},
@@ -2160,7 +2161,7 @@ fn lotto_summary_from_row(row: &tokio_postgres::Row) -> LottoSummaryRow {
     }
 }
 
-fn resolve_lottery_winners(
+pub fn resolve_lottery_winners(
     lottery: &StoredLottoRow,
     tickets: &[StoredTicketRow],
     draw: &LottoDraw,
@@ -2197,65 +2198,23 @@ fn resolve_lottery_winners(
                 })
                 .collect();
             let payouts = split_amount(net_prize_koinu, winners.len());
-            (
-                winners
-                    .into_iter()
-                    .zip(payouts)
-                    .map(|(ticket, payout_koinu)| {
-                        winner_from_scored_ticket(
-                            &lottery.lotto_id,
-                            resolved_height,
-                            (
-                                winners
-                                    .into_iter()
-                                    .enumerate()
-                                    .map(|(rank, ticket)| LottoWinnerRow {
-                                        lotto_id: lottery.lotto_id.clone(),
-                                        inscription_id: ticket.inscription_id.clone(),
-                                        ticket_id: ticket.ticket_id.clone(),
-                                        resolved_height,
-                                        rank: rank as u32 + 1,
-                                        score: ticket.score,
-                                        payout_bps: 10000 / winners.len() as u32,
-                                        gross_payout_koinu: net_prize_koinu,
-                                        tip_percent: ticket.tip_percent,
-                                        tip_deduction_koinu: 0,
-                                        payout_koinu: payouts[rank],
-                                        seed_numbers: ticket.seed_numbers.clone(),
-                                        drawn_numbers: draw.main_numbers.clone(),
-                                        bonus_drawn_numbers: draw.bonus_numbers.clone(),
-                                        fingerprint_distance: None,
-                                        classic_matches: ticket.classic_matches,
-                                        classic_payout_koinu: ticket.classic_payout_koinu,
-                                    })
-                                    .collect(),
-                                false,
-                            )
-            let allocated: u32 = payout_bps.iter().copied().sum();
-            if let Some(first_share) = payout_bps.first_mut() {
-                *first_share += 10_000_u32.saturating_sub(allocated);
-            }
-            let payouts = split_by_bps(net_prize_koinu, &payout_bps);
-            (
-                scored
-                    .into_iter()
-                    .zip(payout_bps)
-                    .zip(payouts)
-                    .enumerate()
-                    .map(|(index, ((ticket, bps), payout_koinu))| {
-                        winner_from_scored_ticket(
-                            &lottery.lotto_id,
-                            resolved_height,
-                            (index + 1) as u32,
-                            bps,
-                            payout_koinu,
-                            ticket,
-                            draw,
-                        )
-                    })
-                    .collect(),
-                false,
-            )
+            let winner_rows: Vec<LottoWinnerRow> = winners
+                .into_iter()
+                .zip(payouts)
+                .map(|(ticket, payout_koinu)| {
+                    winner_from_scored_ticket(
+                        &lottery.lotto_id,
+                        resolved_height,
+                        1,
+                        10_000,
+                        payout_koinu,
+                        ticket,
+                        draw,
+                        None,
+                    )
+                })
+                .collect();
+            (winner_rows, false)
         }
         ResolutionMode::ExactOnlyWithRollover => {
             let exact_matches: Vec<_> = score_tickets(
@@ -2272,24 +2231,23 @@ fn resolve_lottery_winners(
                 return (Vec::new(), lottery.rollover_enabled);
             }
             let payouts = split_amount(net_prize_koinu, exact_matches.len());
-            (
-                exact_matches
-                    .into_iter()
-                    .zip(payouts)
-                    .map(|(ticket, payout_koinu)| {
-                        winner_from_scored_ticket(
-                            &lottery.lotto_id,
-                            resolved_height,
-                            1,
-                            10_000,
-                            payout_koinu,
-                            ticket,
-                            draw,
-                        )
-                    })
-                    .collect(),
-                false,
-            )
+            let winner_rows: Vec<LottoWinnerRow> = exact_matches
+                .into_iter()
+                .zip(payouts)
+                .map(|(ticket, payout_koinu)| {
+                    winner_from_scored_ticket(
+                        &lottery.lotto_id,
+                        resolved_height,
+                        1,
+                        10_000,
+                        payout_koinu,
+                        ticket,
+                        draw,
+                        None,
+                    )
+                })
+                .collect();
+            (winner_rows, false)
         }
         ResolutionMode::ClosestFingerprint => resolve_closest_fingerprint_impl(
             lottery,
@@ -2302,22 +2260,6 @@ fn resolve_lottery_winners(
     }
 }
 
-/// Resolve a closest_fingerprint lottery.
-///
-/// Algorithm:
-/// 1. Parse draw_target (block hash) as big-endian u256.
-/// 2. For each ticket compute distance = |fingerprint_u256 − draw_target_u256|.
-/// 3. Group tickets by exact distance. Within each distance group, sort by
-///    inscription_id lex (smallest first) for deterministic display ranking only.
-/// 4. Assign prize tiers from FINGERPRINT_TIER_BPS (ranks 1-3 are individual;
-///    rank 4-10 is a shared pool split equally). Ties at the same distance share
-///    that tier's prize equally. 10% always rolls over.
-/// 5. Also award classic-match prizes (3+/6 coverage) from a 5% classic pool.
-///
-/// **Tie rule** (auditable via /verify):
-///   Multiple tickets sharing the exact same |fingerprint − target| distance share
-///   their prize tier equally. Display rank within a tie group is sorted by
-///   inscription_id lex (lex-smaller first), for display only.
 fn resolve_closest_fingerprint_impl(
     lottery: &StoredLottoRow,
     tickets: &[StoredTicketRow],
@@ -2330,17 +2272,14 @@ fn resolve_closest_fingerprint_impl(
         return (Vec::new(), true);
     }
 
-    // Parse block hash → [u8; 32] draw target
     let hash_hex = block_hash.trim_start_matches("0x");
     let hash_bytes: Vec<u8> = hex::decode(hash_hex).unwrap_or_default();
     let mut draw_target = [0u8; 32];
     let copy_len = hash_bytes.len().min(32);
     draw_target[..copy_len].copy_from_slice(&hash_bytes[..copy_len]);
 
-    // Classic drawn numbers
     let classic_drawn = derive_classic_drawn_numbers(block_hash);
 
-    // Compute distance for each ticket
     struct FpTicket<'a> {
         ticket: &'a StoredTicketRow,
         distance: [u8; 32],
@@ -2371,50 +2310,35 @@ fn resolve_closest_fingerprint_impl(
         return (Vec::new(), true);
     }
 
-    // Sort by distance ASC, then inscription_id lex ASC (display tie-break only)
     fp_tickets.sort_by(|a, b| {
         a.distance
             .cmp(&b.distance)
             .then_with(|| a.ticket.inscription_id.cmp(&b.ticket.inscription_id))
     });
 
-    // Group by exact distance to detect ties
-    // Tier layout: rank 1 = FINGERPRINT_TIER_BPS[0], rank 2 = [1], rank 3 = [2],
-    //              ranks 4-10 pool = [3], rollover = FINGERPRINT_ROLLOVER_BPS
-    // We assign prize_rank (1-based) by group order; ties share the group's tier.
     let mut winners = Vec::new();
     let mut prize_rank: u32 = 1;
-
     let mut i = 0;
+
     while i < fp_tickets.len() {
         let group_dist = fp_tickets[i].distance;
         let group_start = i;
-
-        // Find end of tie group
         while i < fp_tickets.len() && fp_tickets[i].distance == group_dist {
             i += 1;
         }
-        let group_end = i;
-        let group_size = (group_end - group_start) as u32;
+        let group_size = (i - group_start) as u32;
 
-        // Determine which tier(s) this group covers
-        // ranks 1-3: individual tiers; ranks 4-10: one shared pool tier
-        // A tie group at prize_rank might span multiple tier slots.
         let tier_prize_koinu = compute_tier_prize(prize_rank, group_size, net_prize_koinu);
-
-        // Split tier equally among tied tickets
         let per_ticket_payouts = split_amount(tier_prize_koinu, group_size as usize);
 
-        for (offset, payout) in per_ticket_payouts.into_iter().enumerate() {
+        for (offset, gross_payout_koinu) in per_ticket_payouts.into_iter().enumerate() {
             let fp_ticket = &fp_tickets[group_start + offset];
-            let display_rank = prize_rank; // all ties share same prize_rank
-            let bps = tier_bps_for_rank(prize_rank);
-            let tip_deduction = payout.saturating_mul(fp_ticket.ticket.tip_percent as u64) / 100;
-            let payout_net = payout.saturating_sub(tip_deduction);
+            let payout_bps = tier_bps_for_rank(prize_rank);
+            let tip_deduction_koinu = gross_payout_koinu.saturating_mul(fp_ticket.ticket.tip_percent as u64) / 100;
+            let payout_koinu = gross_payout_koinu.saturating_sub(tip_deduction_koinu);
 
-            // Classic payout from the classic prize pool (not main tier)
             let classic_bps = classic_prize_bps(fp_ticket.classic_matches);
-            let classic_pool = net_prize_koinu.saturating_mul(500) / 10_000; // 5% of net
+            let classic_pool = net_prize_koinu.saturating_mul(500) / 10_000;
             let classic_payout_koinu = if classic_bps > 0 {
                 classic_pool.saturating_mul(classic_bps as u64) / 10_000
             } else {
@@ -2426,8 +2350,8 @@ fn resolve_closest_fingerprint_impl(
                 inscription_id: fp_ticket.ticket.inscription_id.clone(),
                 ticket_id: fp_ticket.ticket.ticket_id.clone(),
                 resolved_height,
-                rank: display_rank,
-                score: 0, // not used in fingerprint mode
+                rank: prize_rank,
+                score: 0,
                 payout_bps,
                 gross_payout_koinu,
                 tip_percent: fp_ticket.ticket.tip_percent,
@@ -2442,15 +2366,12 @@ fn resolve_closest_fingerprint_impl(
             });
         }
 
-        prize_rank = prize_rank.saturating_add(group_size);
-
-        // Stop after rank 10 (ranks 4-10 pool)
+        prize_rank += group_size;
         if prize_rank > 10 {
             break;
         }
     }
 
-    // 10% always rolls over
     (winners, true)
 }
 
@@ -2527,6 +2448,7 @@ fn winner_from_scored_ticket(
     gross_payout_koinu: u64,
     ticket: ScoredTicketRow,
     draw: &LottoDraw,
+    fingerprint_distance: Option<String>,
 ) -> LottoWinnerRow {
     let tip_deduction_koinu = gross_payout_koinu.saturating_mul(ticket.tip_percent as u64) / 100;
     let payout_koinu = gross_payout_koinu.saturating_sub(tip_deduction_koinu);
@@ -2546,7 +2468,7 @@ fn winner_from_scored_ticket(
         seed_numbers: ticket.seed_numbers.clone(),
         drawn_numbers: draw.main_numbers.clone(),
         bonus_drawn_numbers: draw.bonus_numbers.clone(),
-        fingerprint_distance: None,
+        fingerprint_distance,
         classic_matches: 0,
         classic_payout_koinu: 0,
     }
@@ -3418,7 +3340,7 @@ pub async fn insert_dmp_ops<T: GenericClient>(
                 &expiry_height_str,
                 &nonce_str,
                 &l.signature,
-                &block_height_i64,
+                &(block_height_i64.to_string()),
                 &block_timestamp_str,
             ];
             params.extend_from_slice(&values);
@@ -3460,7 +3382,7 @@ pub async fn insert_dmp_ops<T: GenericClient>(
                 &expiry_height_str,
                 &nonce_str,
                 &b.signature,
-                &block_height_i64,
+                &(block_height_i64.to_string()),
                 &block_timestamp_str,
             ];
             params.extend_from_slice(&values);
@@ -3519,7 +3441,7 @@ pub async fn insert_dmp_ops<T: GenericClient>(
                 &nonce_str,
                 &s.signature,
                 &block_height_str,
-                &block_timestamp_i64,
+                &(block_timestamp_i64.to_string()),
             ];
             params.extend_from_slice(&values);
         }
@@ -3563,7 +3485,7 @@ pub async fn insert_dmp_ops<T: GenericClient>(
                 &nonce_str,
                 &c.signature,
                 &block_height_str,
-                &block_timestamp_i64,
+                &(block_timestamp_i64.to_string()),
             ];
             params.extend_from_slice(&values);
         }

@@ -1246,7 +1246,9 @@ dependencies = [
 name = "doge-lotto"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "serde",
+ "serde_json",
  "sha2",
 ]
 
@@ -1324,6 +1326,7 @@ dependencies = [
  "lru 0.13.0",
  "maplit",
  "num_cpus",
+ "once_cell",
  "postgres",
  "pprof",
  "progressing",

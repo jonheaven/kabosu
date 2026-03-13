@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use doginals::{
     inscription::Inscription,
     media::{Language, Media},

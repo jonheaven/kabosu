@@ -27,10 +27,8 @@ use crate::core::meta_protocols::drc20::{
     drc20_activation_height,
     parser::{parse_drc20_operation, ParsedDrc20Operation},
 };
-use crate::core::meta_protocols::lotto::{
-    try_parse_lotto_deploy, try_parse_lotto_mint, LottoDeploy, LottoMint,
-};
 
+use doge_lotto::{try_parse_lotto_deploy, try_parse_lotto_mint, LottoDeploy, LottoMint};
 /// A DMP operation parsed from an inscription body, bundled with context.
 #[derive(Debug, Clone)]
 pub struct ParsedDmpOp {
