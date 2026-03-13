@@ -310,12 +310,7 @@ async fn insert_inscriptions<T: GenericClient>(
     if inscriptions.is_empty() {
         return Ok(());
     }
-    let mut current_batch_size = 500usize;
-    let mut current_index = 0usize;
-
-    while current_index < inscriptions.len() {
-        let next_index = (current_index + current_batch_size).min(inscriptions.len());
-        let chunk = &inscriptions[current_index..next_index];
+    for chunk in inscriptions.chunks(500) {
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
         for row in chunk.iter() {
             params.push(&row.inscription_id);
@@ -343,7 +338,6 @@ async fn insert_inscriptions<T: GenericClient>(
             params.push(&row.dogespells);
             params.push(&row.unbound_sequence);
         }
-        let insert_started = Instant::now();
         client
             .query(
                 &format!("INSERT INTO inscriptions
@@ -356,15 +350,6 @@ async fn insert_inscriptions<T: GenericClient>(
             )
             .await
             .map_err(|e| format!("insert_inscriptions: {e}"))?;
-
-        let insert_time_ms = insert_started.elapsed().as_millis();
-        if insert_time_ms < 50 {
-            current_batch_size = (current_batch_size + 150).min(2000);
-        } else if insert_time_ms > 150 {
-            current_batch_size = (current_batch_size - 100).max(250);
-        }
-
-        current_index = next_index;
     }
     Ok(())
 }
@@ -2220,32 +2205,32 @@ fn resolve_lottery_winners(
                         winner_from_scored_ticket(
                             &lottery.lotto_id,
                             resolved_height,
-                            1,
-                            10_000,
-                            payout_koinu,
-                            ticket,
-                            draw,
-                        )
-                    })
-                    .collect(),
-                false,
-            )
-        }
-        ResolutionMode::ClosestWins => {
-            if tickets.is_empty() {
-                return (Vec::new(), false);
-            }
-            let mut scored = score_tickets(
-                tickets,
-                draw,
-                &lottery.template,
-                &lottery.lotto_id,
-                resolved_block_hash,
-            );
-            let mut payout_bps = payout_bps_for_template(&lottery.template, &lottery.lotto_id);
-            let winner_cap = payout_bps.len().max(1);
-            scored.truncate(winner_cap);
-            payout_bps.truncate(scored.len());
+                            (
+                                winners
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(rank, ticket)| LottoWinnerRow {
+                                        lotto_id: lottery.lotto_id.clone(),
+                                        inscription_id: ticket.inscription_id.clone(),
+                                        ticket_id: ticket.ticket_id.clone(),
+                                        resolved_height,
+                                        rank: rank as u32 + 1,
+                                        score: ticket.score,
+                                        payout_bps: 10000 / winners.len() as u32,
+                                        gross_payout_koinu: net_prize_koinu,
+                                        tip_percent: ticket.tip_percent,
+                                        tip_deduction_koinu: 0,
+                                        payout_koinu: payouts[rank],
+                                        seed_numbers: ticket.seed_numbers.clone(),
+                                        drawn_numbers: draw.main_numbers.clone(),
+                                        bonus_drawn_numbers: draw.bonus_numbers.clone(),
+                                        fingerprint_distance: None,
+                                        classic_matches: ticket.classic_matches,
+                                        classic_payout_koinu: ticket.classic_payout_koinu,
+                                    })
+                                    .collect(),
+                                false,
+                            )
             let allocated: u32 = payout_bps.iter().copied().sum();
             if let Some(first_share) = payout_bps.first_mut() {
                 *first_share += 10_000_u32.saturating_sub(allocated);
@@ -2443,11 +2428,11 @@ fn resolve_closest_fingerprint_impl(
                 resolved_height,
                 rank: display_rank,
                 score: 0, // not used in fingerprint mode
-                payout_bps: bps,
-                gross_payout_koinu: payout,
+                payout_bps,
+                gross_payout_koinu,
                 tip_percent: fp_ticket.ticket.tip_percent,
-                tip_deduction_koinu: tip_deduction,
-                payout_koinu: payout_net,
+                tip_deduction_koinu,
+                payout_koinu,
                 seed_numbers: fp_ticket.ticket.seed_numbers.clone(),
                 drawn_numbers: draw.main_numbers.clone(),
                 bonus_drawn_numbers: draw.bonus_numbers.clone(),
@@ -2558,7 +2543,7 @@ fn winner_from_scored_ticket(
         tip_percent: ticket.tip_percent,
         tip_deduction_koinu,
         payout_koinu,
-        seed_numbers: ticket.seed_numbers,
+        seed_numbers: ticket.seed_numbers.clone(),
         drawn_numbers: draw.main_numbers.clone(),
         bonus_drawn_numbers: draw.bonus_numbers.clone(),
         fingerprint_distance: None,
@@ -3398,131 +3383,206 @@ pub async fn insert_dmp_ops<T: GenericClient>(
     ops: &[ParsedDmpOp],
     client: &T,
 ) -> Result<(), String> {
+    let mut listings = Vec::new();
+    let mut bids = Vec::new();
+    let mut settlements = Vec::new();
+    let mut cancels = Vec::new();
+
     for parsed in ops {
         match &parsed.op {
-            DmpOperation::Listing(l) => {
-                client
-                    .execute(
-                        "INSERT INTO dmp_listings
-                            (listing_id, inscription_id, seller, price_koinu, psbt_cid,
-                             expiry_height, nonce, signature, block_height, block_timestamp)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                         ON CONFLICT (listing_id) DO NOTHING",
-                        &[
-                            &l.inscription_id,
-                            &l.inscription_id,
-                            &l.seller,
-                            &(l.price_koinu as i64),
-                            &l.psbt_cid,
-                            &(l.expiry_height as i64),
-                            &(l.nonce as i64),
-                            &l.signature,
-                            &(parsed.block_height as i64),
-                            &(parsed.block_timestamp as i64),
-                        ],
-                    )
-                    .await
-                    .map_err(|e| format!("insert_dmp_ops (listing): {e}"))?;
-            }
-            DmpOperation::Bid(b) => {
-                client
-                    .execute(
-                        "INSERT INTO dmp_bids
-                            (bid_id, listing_id, bidder, price_koinu, psbt_cid,
-                             expiry_height, nonce, signature, block_height, block_timestamp)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                         ON CONFLICT (bid_id) DO NOTHING",
-                        &[
-                            &b.inscription_id,
-                            &b.listing_id,
-                            &b.bidder,
-                            &(b.price_koinu as i64),
-                            &b.psbt_cid,
-                            &(b.expiry_height as i64),
-                            &(b.nonce as i64),
-                            &b.signature,
-                            &(parsed.block_height as i64),
-                            &(parsed.block_timestamp as i64),
-                        ],
-                    )
-                    .await
-                    .map_err(|e| format!("insert_dmp_ops (bid): {e}"))?;
-            }
-            DmpOperation::Settle(s) => {
-                // Mark the original listing as settled
-                client
-                    .execute(
-                        "UPDATE dmp_listings SET settled = TRUE WHERE listing_id = $1",
-                        &[&s.listing_id],
-                    )
-                    .await
-                    .map_err(|e| format!("insert_dmp_ops (settle update listing): {e}"))?;
-
-                // Mark the accepted bid as settled (if provided)
-                if let Some(ref bid_id) = s.bid_id {
-                    client
-                        .execute(
-                            "UPDATE dmp_bids SET settled = TRUE WHERE bid_id = $1",
-                            &[bid_id],
-                        )
-                        .await
-                        .map_err(|e| format!("insert_dmp_ops (settle update bid): {e}"))?;
-                }
-
-                client
-                    .execute(
-                        "INSERT INTO dmp_settlements
-                            (settlement_id, listing_id, bid_id, settler, psbt_cid,
-                             nonce, signature, block_height, block_timestamp)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-                         ON CONFLICT (settlement_id) DO NOTHING",
-                        &[
-                            &s.inscription_id,
-                            &s.listing_id,
-                            &s.bid_id,
-                            &s.settler,
-                            &s.psbt_cid,
-                            &(s.nonce as i64),
-                            &s.signature,
-                            &(parsed.block_height as i64),
-                            &(parsed.block_timestamp as i64),
-                        ],
-                    )
-                    .await
-                    .map_err(|e| format!("insert_dmp_ops (settlement): {e}"))?;
-            }
-            DmpOperation::Cancel(c) => {
-                // Mark the listing as cancelled
-                client
-                    .execute(
-                        "UPDATE dmp_listings SET cancelled = TRUE WHERE listing_id = $1",
-                        &[&c.listing_id],
-                    )
-                    .await
-                    .map_err(|e| format!("insert_dmp_ops (cancel update listing): {e}"))?;
-
-                client
-                    .execute(
-                        "INSERT INTO dmp_cancels
-                            (cancel_id, listing_id, canceller, nonce, signature,
-                             block_height, block_timestamp)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7)
-                         ON CONFLICT (cancel_id) DO NOTHING",
-                        &[
-                            &c.inscription_id,
-                            &c.listing_id,
-                            &c.canceller,
-                            &(c.nonce as i64),
-                            &c.signature,
-                            &(parsed.block_height as i64),
-                            &(parsed.block_timestamp as i64),
-                        ],
-                    )
-                    .await
-                    .map_err(|e| format!("insert_dmp_ops (cancel): {e}"))?;
-            }
+            DmpOperation::Listing(l) => listings.push((l, parsed)),
+            DmpOperation::Bid(b) => bids.push((b, parsed)),
+            DmpOperation::Settle(s) => settlements.push((s, parsed)),
+            DmpOperation::Cancel(c) => cancels.push((c, parsed)),
         }
     }
+
+    for chunk in listings.chunks(500) {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
+        for (l, parsed) in chunk {
+            let price_koinu_i64 = l.price_koinu as i64;
+            let price_koinu_str = price_koinu_i64.to_string();
+            let expiry_height_i64 = l.expiry_height as i64;
+            let expiry_height_str = expiry_height_i64.to_string();
+            let nonce_i64 = l.nonce as i64;
+            let nonce_str = nonce_i64.to_string();
+            let block_height_i64 = parsed.block_height as i64;
+            let block_timestamp_i64 = parsed.block_timestamp as i64;
+            let block_timestamp_str = block_timestamp_i64.to_string();
+            let values = [
+                &l.inscription_id,
+                &l.inscription_id,
+                &l.seller,
+                &price_koinu_str,
+                &l.psbt_cid,
+                &expiry_height_str,
+                &nonce_str,
+                &l.signature,
+                &block_height_i64,
+                &block_timestamp_str,
+            ];
+            params.extend_from_slice(&values);
+        }
+        client
+            .query(
+                &format!(
+                    "INSERT INTO dmp_listings
+                (listing_id, inscription_id, seller, price_koinu, psbt_cid,
+                 expiry_height, nonce, signature, block_height, block_timestamp)
+             VALUES {}
+             ON CONFLICT (listing_id) DO NOTHING",
+                    utils::multi_row_query_param_str(chunk.len(), 10)
+                ),
+                &params,
+            )
+            .await
+            .map_err(|e| format!("insert_dmp_ops (listing): {e}"))?;
+    }
+
+    for chunk in bids.chunks(500) {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
+        for (b, parsed) in chunk {
+            let price_koinu_i64 = b.price_koinu as i64;
+            let price_koinu_str = price_koinu_i64.to_string();
+            let expiry_height_i64 = b.expiry_height as i64;
+            let expiry_height_str = expiry_height_i64.to_string();
+            let nonce_i64 = b.nonce as i64;
+            let nonce_str = nonce_i64.to_string();
+            let block_height_i64 = parsed.block_height as i64;
+            let block_timestamp_i64 = parsed.block_timestamp as i64;
+            let block_timestamp_str = block_timestamp_i64.to_string();
+            let values = [
+                &b.inscription_id,
+                &b.listing_id,
+                &b.bidder,
+                &price_koinu_str,
+                &b.psbt_cid,
+                &expiry_height_str,
+                &nonce_str,
+                &b.signature,
+                &block_height_i64,
+                &block_timestamp_str,
+            ];
+            params.extend_from_slice(&values);
+        }
+        client
+            .query(
+                &format!(
+                    "INSERT INTO dmp_bids
+                (bid_id, listing_id, bidder, price_koinu, psbt_cid,
+                 expiry_height, nonce, signature, block_height, block_timestamp)
+             VALUES {}
+             ON CONFLICT (bid_id) DO NOTHING",
+                    utils::multi_row_query_param_str(chunk.len(), 10)
+                ),
+                &params,
+            )
+            .await
+            .map_err(|e| format!("insert_dmp_ops (bid): {e}"))?;
+    }
+
+    for (s, _) in &settlements {
+        client
+            .execute(
+                "UPDATE dmp_listings SET settled = TRUE WHERE listing_id = $1",
+                &[&s.listing_id],
+            )
+            .await
+            .map_err(|e| format!("insert_dmp_ops (settle update listing): {e}"))?;
+        if let Some(ref bid_id) = s.bid_id {
+            client
+                .execute(
+                    "UPDATE dmp_bids SET settled = TRUE WHERE bid_id = $1",
+                    &[bid_id],
+                )
+                .await
+                .map_err(|e| format!("insert_dmp_ops (settle update bid): {e}"))?;
+        }
+    }
+    for chunk in settlements.chunks(500) {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
+        for (s, parsed) in chunk {
+            let nonce_i64 = s.nonce as i64;
+            let nonce_str = nonce_i64.to_string();
+            let block_height_i64 = parsed.block_height as i64;
+            let block_height_str = block_height_i64.to_string();
+            let block_timestamp_i64 = parsed.block_timestamp as i64;
+            let values = [
+                &s.inscription_id,
+                &s.listing_id,
+                match &s.bid_id {
+                    Some(bid) => bid,
+                    None => "",
+                },
+                &s.settler,
+                &s.psbt_cid,
+                &nonce_str,
+                &s.signature,
+                &block_height_str,
+                &block_timestamp_i64,
+            ];
+            params.extend_from_slice(&values);
+        }
+        client
+            .query(
+                &format!(
+                    "INSERT INTO dmp_settlements
+                (settlement_id, listing_id, bid_id, settler, psbt_cid,
+                 nonce, signature, block_height, block_timestamp)
+             VALUES {}
+             ON CONFLICT (settlement_id) DO NOTHING",
+                    utils::multi_row_query_param_str(chunk.len(), 9)
+                ),
+                &params,
+            )
+            .await
+            .map_err(|e| format!("insert_dmp_ops (settlement): {e}"))?;
+    }
+
+    for (c, _) in &cancels {
+        client
+            .execute(
+                "UPDATE dmp_listings SET cancelled = TRUE WHERE listing_id = $1",
+                &[&c.listing_id],
+            )
+            .await
+            .map_err(|e| format!("insert_dmp_ops (cancel update listing): {e}"))?;
+    }
+    for chunk in cancels.chunks(500) {
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
+        for (c, parsed) in chunk {
+            let nonce_i64 = c.nonce as i64;
+            let nonce_str = nonce_i64.to_string();
+            let block_height_i64 = parsed.block_height as i64;
+            let block_height_str = block_height_i64.to_string();
+            let block_timestamp_i64 = parsed.block_timestamp as i64;
+            let values = [
+                &c.inscription_id,
+                &c.listing_id,
+                &c.canceller,
+                &nonce_str,
+                &c.signature,
+                &block_height_str,
+                &block_timestamp_i64,
+            ];
+            params.extend_from_slice(&values);
+        }
+        client
+            .query(
+                &format!(
+                    "INSERT INTO dmp_cancels
+                (cancel_id, listing_id, canceller, nonce, signature,
+                 block_height, block_timestamp)
+             VALUES {}
+             ON CONFLICT (cancel_id) DO NOTHING",
+                    utils::multi_row_query_param_str(chunk.len(), 7)
+                ),
+                &params,
+            )
+            .await
+            .map_err(|e| format!("insert_dmp_ops (cancel): {e}"))?;
+    }
+
     Ok(())
 }
 
@@ -3824,7 +3884,7 @@ mod test {
                     .hash("0x000000000000000000024d4c784521e54b6f4a5945376ae6e248cee1ed2c0627".to_string())
                     .add_transaction(
                         TestTransactionBuilder::new()
-                            .hash("0xb61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735".to_string())
+                            .hash("0xb61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d6357355".to_string())
                             .add_ordinal_operation(OrdinalOperation::InscriptionRevealed(
                                 OrdinalInscriptionRevealData {
                                     content_bytes: "0x7b200a20202270223a20226272632d3230222c0a2020226f70223a20226465706c6f79222c0a2020227469636b223a20226f726469222c0a2020226d6178223a20223231303030303030222c0a2020226c696d223a202231303030220a7d".to_string(),
@@ -3997,11 +4057,11 @@ mod test {
                 assert_eq!(1, get_recursive_count(false, &client).await);
                 assert_eq!(
                     0,
-                    get_address_count("324A7GHA2azecbVBAFy4pzEhcPT1GjbUAp", &client).await
+                    get_address_count("3DnzPvLPH1jA9EqQzq3Fgo9BMDya4eG1ay", &client).await
                 );
                 assert_eq!(
                     1,
-                    get_address_count("3DnzPvLPH1jA9EqQzq3Fgo9BMDya4eG1ay", &client).await
+                    get_address_count("324A7GHA2azecbVBAFy4pzEhcPT1GjbUAp", &client).await
                 );
                 assert_eq!(
                     1,

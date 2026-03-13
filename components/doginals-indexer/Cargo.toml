@@ -7,9 +7,8 @@ edition = "2021"
 num_cpus = "1.16.0"
 anyhow = { version = "1.0.56", features = ["backtrace"] }
 ciborium = "0.2"
-serde = "1"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-serde_derive = "1"
 hex = "0.4.3"
 sha2 = "0.10"
 hmac = "0.12"
@@ -52,6 +51,7 @@ refinery = { workspace = true }
 maplit = "1.0.2"
 redb = "2.2.0"
 doginals = { path = "../doginals" }
+ doge-lotto = { path = "../../../doge-lotto" }
 
 [dev-dependencies]
 test-case = "3.1.0"

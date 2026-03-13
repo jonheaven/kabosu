@@ -38,9 +38,6 @@ use postgres::{pg_pool, pg_pool_client};
 use utils::monitoring::{start_serving_prometheus_metrics, PrometheusMonitoring};
 
 #[macro_use]
-extern crate serde_derive;
-
-#[macro_use]
 extern crate lazy_static;
 
 extern crate serde;

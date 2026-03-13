@@ -1243,6 +1243,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "doge-lotto"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "dogecoin"
 version = "0.1.0"
 dependencies = [
@@ -1300,6 +1308,7 @@ dependencies = [
  "crossbeam-channel",
  "dashmap",
  "deadpool-postgres",
+ "doge-lotto",
  "dogecoin",
  "doginals",
  "flate2",
@@ -1326,7 +1335,6 @@ dependencies = [
  "reqwest 0.11.27",
  "rocksdb",
  "serde",
- "serde_derive",
  "serde_json",
  "sha2",
  "tar",
