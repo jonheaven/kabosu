@@ -30,6 +30,7 @@ kabosu doginals index --test-blk-range 5000000..5000100
 ### Key flags
 
 - `--from <HEIGHT>` — Start indexing from this block (inclusive)
+- `--index-rare-koinu` — Force start at height `0` (includes pre-Doginals rare-koinu era)
 - `--to <HEIGHT>` — Stop indexing at this block (inclusive). After this block the indexer stops (no live tail).
 - `--test-blk-range <START>..<END>` — Shorthand for `--from START --to END --data-source file` (forces fast mode, great for testing).
 
@@ -37,6 +38,7 @@ kabosu doginals index --test-blk-range 5000000..5000100
 
 - **Daily production run:** just `kabosu doginals index` (runs forever)
 - **Backfill a specific week:** `--from 4650000 --to 4660000`
+- **Include rare-koinu era:** `--index-rare-koinu`
 - **Test a new predicate before production:** `--test-blk-range 5000000..5001000`
 
 ---

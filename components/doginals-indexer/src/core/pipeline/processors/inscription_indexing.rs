@@ -41,7 +41,10 @@ use crate::{
             sequence_cursor::SequenceCursor,
         },
     },
-    db::doginals_pg::{self, get_chain_tip_block_height},
+    db::{
+        checkpoint,
+        doginals_pg::{self, get_chain_tip_block_height},
+    },
     utils::{monitoring::PrometheusMonitoring, webhooks},
     PgConnectionPools,
 };
@@ -804,6 +807,7 @@ pub async fn index_block(
         if let Err(e) = ord_tx.commit().await {
             return Err(format!("unable to commit ordinals pg transaction: {}", e));
         }
+        checkpoint::write_checkpoint(config, block_height)?;
     }
 
     // Record overall processing time

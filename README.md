@@ -1,3 +1,18 @@
+
+## Performance upgrades (Dogecoin Core-inspired)
+
+Kabosu now includes a major performance pass inspired by Dogecoin Core internals:
+
+- **Batched Postgres writes** for inscriptions, DMP, and DogeLotto paths (500-row chunks + `ON CONFLICT`).
+- **Parallel indexing pipeline** architecture (reader/parser/filter/writer staging).
+- **Connection pooling + hot prepared statement path** using `deadpool-postgres`.
+- **In-memory hot caches** for recent blocks (last 1,000) and recent ownership movements.
+- **Predicate pre-filtering** (quick MIME/content-prefix checks before expensive parsing).
+- **Smart start height + checkpoint resume**:
+  - defaults to **Doginals genesis `4609720`** on mainnet,
+  - use `--index-rare-koinu` (or `--from 0`) to include the full chain,
+  - redb checkpoint file enables instant resume after restart.
+
 <p align="center">
   <img src="logo.png" alt="kabosu logo" />
 </p>

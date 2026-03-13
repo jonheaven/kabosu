@@ -24,7 +24,7 @@ use std::{
 use config::Config;
 use db::{
     blocks::{self, find_last_block_inserted, open_blocks_db_with_retry},
-    doginals_pg, migrate_dbs,
+    checkpoint, doginals_pg, migrate_dbs,
 };
 use deadpool_postgres::Pool;
 use dogecoin::{
@@ -33,6 +33,7 @@ use dogecoin::{
     utils::{future_block_on, Context},
     Indexer, IndexerCommand,
 };
+use lru::LruCache;
 use postgres::{pg_pool, pg_pool_client};
 use utils::monitoring::{start_serving_prometheus_metrics, PrometheusMonitoring};
 
@@ -82,6 +83,8 @@ async fn new_ordinals_indexer_runloop(
         .spawn(move || {
             future_block_on(&ctx_moved.clone(), async move {
                 let cache_l2 = Arc::new(new_traversals_lazy_cache(2048));
+                let mut recent_blocks_cache = LruCache::new(std::num::NonZeroUsize::new(1_000).unwrap());
+                let recent_owners_cache = Arc::new(dashmap::DashMap::<u64, String>::new());
                 let garbage_collect_every_n_blocks = 100;
                 let mut garbage_collect_nth_block = 0;
 
@@ -143,6 +146,17 @@ async fn new_ordinals_indexer_runloop(
                                     Err(e) => return Err(format!("error indexing blocks: {e}")),
                                 };
 
+
+                                for block in &blocks {
+                                    recent_blocks_cache.put(block.block_identifier.index, block.block_identifier.hash.clone());
+                                    for tx in &block.transactions {
+                                        for op in &tx.metadata.ordinal_operations {
+                                            if let dogecoin::types::OrdinalOperation::InscriptionTransferred(data) = op {
+                                                recent_owners_cache.insert(data.ordinal_number, format!("{:?}", data.destination));
+                                            }
+                                        }
+                                    }
+                                }
                                 garbage_collect_nth_block += blocks.len();
                                 if garbage_collect_nth_block > garbage_collect_every_n_blocks {
                                     try_debug!(
@@ -184,21 +198,25 @@ async fn new_ordinals_indexer_runloop(
             None
         }
     };
-    let chain_tip = match (pg_chain_tip, blocks_chain_tip) {
-        // Index chain tip is the minimum of postgres DB tip vs blocks DB tip.
-        (Some(x), Some(y)) => Some(if x.index <= y.index { x } else { y }),
-        // No blocks DB means start from zero so we can pull them.
-        (Some(_), None) => None,
-        // No postgres DB means we might be using an archived blocks DB, make sure we index from the first inscription chain tip.
-        (None, Some(y)) => {
+    let checkpoint_tip = checkpoint::read_checkpoint(config)?.map(|index| BlockIdentifier {
+        index,
+        hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
+    });
+
+    let chain_tip = match (pg_chain_tip, blocks_chain_tip, checkpoint_tip) {
+        (Some(x), Some(y), Some(z)) => Some([x, y, z].into_iter().min_by_key(|b| b.index).unwrap()),
+        (Some(x), Some(y), None) => Some(if x.index <= y.index { x } else { y }),
+        (Some(x), None, Some(z)) => Some(if x.index <= z.index { x } else { z }),
+        (None, Some(y), Some(z)) => Some(if y.index <= z.index { y } else { z }),
+        (Some(_), None, None) => None,
+        (None, Some(y), None) | (None, None, Some(y)) => {
             let x = BlockIdentifier {
                 index: first_inscription_height(config) - 1,
                 hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
             };
             Some(if x.index <= y.index { x } else { y })
         }
-        // Start from zero.
-        (None, None) => None,
+        (None, None, None) => None,
     };
     Ok(Indexer {
         commands_tx,

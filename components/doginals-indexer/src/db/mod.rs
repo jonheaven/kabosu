@@ -1,4 +1,5 @@
 pub mod blocks;
+pub mod checkpoint;
 pub mod doginals_pg;
 pub mod models;
 

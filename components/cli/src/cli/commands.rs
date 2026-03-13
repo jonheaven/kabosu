@@ -450,6 +450,9 @@ pub struct SyncIndexCommand {
     /// Stop syncing at this block height inclusive (overrides stop_block in config).
     #[clap(long, value_name = "HEIGHT")]
     pub to: Option<u64>,
+    /// Start from height 0 to include the rare-koinu era (overrides smart default genesis).
+    #[clap(long)]
+    pub index_rare_koinu: bool,
     /// Force file mode for a specific block range (e.g. 500000..500100).
     /// Overrides data_source = "file", start_block, and stop_block.
     /// Useful for debugging inscription parsing on a small range without a full sync.

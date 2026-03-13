@@ -373,6 +373,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     if let Some(to) = cmd.to {
                         config.stop_block = Some(to);
                     }
+                    if cmd.index_rare_koinu {
+                        config.start_block = Some(0);
+                    }
                     if let Some(range_str) = &cmd.test_blk_range {
                         let (start, end) = parse_blk_range(range_str)?;
                         config.dogecoin.data_source = DogecoinDataSource::File;
@@ -435,6 +438,9 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     }
                     if let Some(to) = cmd.to {
                         config.stop_block = Some(to);
+                    }
+                    if cmd.index_rare_koinu {
+                        config.start_block = Some(0);
                     }
                     if let Some(range_str) = &cmd.test_blk_range {
                         let (start, end) = parse_blk_range(range_str)?;

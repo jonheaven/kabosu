@@ -18,7 +18,7 @@ pub fn first_inscription_height(config: &Config) -> u64 {
     }
     match config.dogecoin.network {
         // Dogecoin values mirrored from the `dog` indexer chain constants.
-        Network::Bitcoin => 4_600_000,
+        Network::Bitcoin => 4_609_720,
         Network::Regtest => 0,
         Network::Testnet | Network::Testnet4 => 4_250_000,
         // Dogecoin does not define signet in core; keep this disabled.

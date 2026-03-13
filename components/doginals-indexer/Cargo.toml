@@ -50,6 +50,7 @@ tokio-postgres = { workspace = true }
 deadpool-postgres = { workspace = true }
 refinery = { workspace = true }
 maplit = "1.0.2"
+redb = "2.2.0"
 doginals = { path = "../doginals" }
 
 [dev-dependencies]

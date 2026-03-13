@@ -151,6 +151,27 @@ pub fn parse_inscriptions_from_witness(
     Some(inscriptions)
 }
 
+fn quick_mime_or_prefix_match(
+    content_type: &str,
+    body: Option<&Vec<u8>>,
+    prefixes: &[String],
+) -> bool {
+    if prefixes.is_empty() {
+        return true;
+    }
+    if prefixes.iter().any(|p| content_type.starts_with(p)) {
+        return true;
+    }
+    if let Some(b) = body {
+        for p in prefixes {
+            if b.starts_with(p.as_bytes()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn parse_inscriptions_from_standardized_tx(
     tx: &mut DogecoinTransactionData,
@@ -307,7 +328,11 @@ pub fn parse_inscriptions_from_standardized_tx(
 
         // Check for DRC-20 operations
         if let Some(drc20) = config.ordinals_drc20_config() {
-            if drc20.enabled && block_identifier.index >= drc20_activation_height(network) {
+            if drc20.enabled
+                && block_identifier.index >= drc20_activation_height(network)
+                && (content_type.starts_with("application/json")
+                    || inscription_content_bytes.starts_with(b"{"))
+            {
                 match parse_drc20_operation(&inscription) {
                     Ok(Some(op)) => {
                         drc20_operation_map.insert(reveal_data.inscription_id.clone(), op);
@@ -346,6 +371,11 @@ pub fn parse_inscriptions_from_standardized_tx(
         // DogeLotto detection mirrors DNS/Dogemap: parse before global predicates so
         // protocol activity is never dropped by selective indexing rules.
         if config.lotto_enabled()
+            && quick_mime_or_prefix_match(
+                &content_type,
+                inscription.body.as_ref(),
+                &config.protocols.lotto.content_prefixes,
+            )
             && crate::core::protocol::predicate::inscription_matches_content_prefixes(
                 &inscription,
                 &config.protocols.lotto.content_prefixes,
