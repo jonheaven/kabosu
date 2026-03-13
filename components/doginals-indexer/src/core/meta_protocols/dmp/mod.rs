@@ -25,6 +25,8 @@
 
 use serde::Deserialize;
 
+use crate::manifest::expand_json_keys;
+
 /// Wire-format protocol identifier.
 pub const DMP_PROTOCOL: &str = "DMP";
 /// Wire-format version string.
@@ -97,16 +99,26 @@ pub enum DmpOperation {
 
 #[derive(Deserialize)]
 struct RawDmp {
+    #[serde(alias = "p")]
     protocol: Option<String>,
+    #[serde(alias = "v")]
     version: Option<String>,
     op: Option<String>,
+    #[serde(alias = "lid")]
     listing_id: Option<String>,
+    #[serde(alias = "bid")]
     bid_id: Option<String>,
+    #[serde(alias = "s")]
     seller: Option<String>,
+    #[serde(alias = "pk")]
     price_koinu: Option<u64>,
+    #[serde(alias = "pc")]
     psbt_cid: Option<String>,
+    #[serde(alias = "ex")]
     expiry_height: Option<u64>,
+    #[serde(alias = "n")]
     nonce: Option<u64>,
+    #[serde(alias = "sig")]
     signature: Option<String>,
 }
 
@@ -127,7 +139,7 @@ pub fn try_parse_dmp(body: &[u8], inscription_id: &str) -> Option<DmpOperation> 
         return None;
     }
 
-    let raw: RawDmp = serde_json::from_str(text).ok()?;
+    let raw: RawDmp = serde_json::from_slice(&expand_json_keys(text.as_bytes()).unwrap_or_else(|| text.as_bytes().to_vec())).ok()?;
 
     if raw.protocol.as_deref()? != DMP_PROTOCOL {
         return None;
