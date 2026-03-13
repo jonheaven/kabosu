@@ -664,23 +664,41 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     defaults.template
                 };
 
-                let payload = serde_json::json!({
-                    "p": "DogeLotto",
-                    "op": "deploy",
-                    "lotto_id": cmd.lotto_id,
-                    "template": template,
-                    "draw_block": cmd.draw_block,
-                    "cutoff_block": cutoff_block,
-                    "ticket_price_koinu": cmd.ticket_price_koinu,
-                    "prize_pool_address": cmd.prize_pool_address,
-                    "fee_percent": cmd.fee_percent,
-                    "main_numbers": main_numbers,
-                    "bonus_numbers": bonus_numbers,
-                    "resolution_mode": resolution_mode,
-                    "rollover_enabled": cmd.rollover_enabled,
-                    "guaranteed_min_prize_koinu": cmd.guaranteed_min_prize_koinu,
-                });
-                let payload = compact_json_without_nulls(payload)?;
+                let payload = if cmd.minify {
+                    compact_json_without_nulls(serde_json::json!({
+                        "p": "DogeLotto",
+                        "op": "deploy",
+                        "li": cmd.lotto_id,
+                        "te": template,
+                        "db": cmd.draw_block,
+                        "cb": cutoff_block,
+                        "pk": cmd.ticket_price_koinu,
+                        "pa": cmd.prize_pool_address,
+                        "fp": cmd.fee_percent,
+                        "mn": main_numbers,
+                        "bn": bonus_numbers,
+                        "rm": resolution_mode,
+                        "re": cmd.rollover_enabled,
+                        "gm": cmd.guaranteed_min_prize_koinu,
+                    }))?
+                } else {
+                    compact_json_without_nulls(serde_json::json!({
+                        "p": "DogeLotto",
+                        "op": "deploy",
+                        "lotto_id": cmd.lotto_id,
+                        "template": template,
+                        "draw_block": cmd.draw_block,
+                        "cutoff_block": cutoff_block,
+                        "ticket_price_koinu": cmd.ticket_price_koinu,
+                        "prize_pool_address": cmd.prize_pool_address,
+                        "fee_percent": cmd.fee_percent,
+                        "main_numbers": main_numbers,
+                        "bonus_numbers": bonus_numbers,
+                        "resolution_mode": resolution_mode,
+                        "rollover_enabled": cmd.rollover_enabled,
+                        "guaranteed_min_prize_koinu": cmd.guaranteed_min_prize_koinu,
+                    }))?
+                };
                 if cmd.json {
                     println!(
                         "{}",
@@ -743,16 +761,27 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 let ticket_id = cmd.ticket_id.clone().unwrap_or_else(generate_ticket_id);
                 let is_deno = cmd.lotto_id == "deno";
 
-                let payload = serde_json::json!({
-                    "p": "DogeLotto",
-                    "op": "mint",
-                    "lotto_id": cmd.lotto_id,
-                    "ticket_id": ticket_id,
-                    "seed_numbers": if is_deno { serde_json::Value::Null } else { serde_json::json!(seed_numbers.clone()) },
-                    "luck_marks": if is_deno { serde_json::json!(seed_numbers.clone()) } else { serde_json::Value::Null },
-                    "tip_percent": cmd.tip,
-                });
-                let payload = compact_json_without_nulls(payload)?;
+                let payload = if cmd.minify {
+                    compact_json_without_nulls(serde_json::json!({
+                        "p": "DogeLotto",
+                        "op": "mint",
+                        "li": cmd.lotto_id,
+                        "ti": ticket_id,
+                        "sn": if is_deno { serde_json::Value::Null } else { serde_json::json!(seed_numbers.clone()) },
+                        "lm": if is_deno { serde_json::json!(seed_numbers.clone()) } else { serde_json::Value::Null },
+                        "tp": cmd.tip,
+                    }))?
+                } else {
+                    compact_json_without_nulls(serde_json::json!({
+                        "p": "DogeLotto",
+                        "op": "mint",
+                        "lotto_id": cmd.lotto_id,
+                        "ticket_id": ticket_id,
+                        "seed_numbers": if is_deno { serde_json::Value::Null } else { serde_json::json!(seed_numbers.clone()) },
+                        "luck_marks": if is_deno { serde_json::json!(seed_numbers.clone()) } else { serde_json::Value::Null },
+                        "tip_percent": cmd.tip,
+                    }))?
+                };
                 let result = broadcast_atomic_lotto_mint(
                     &config,
                     &status.summary.prize_pool_address,

@@ -47,6 +47,7 @@ extern crate serde;
 
 pub mod core;
 pub mod db;
+pub mod manifest;
 pub mod utils;
 
 #[derive(Debug, Clone)]
@@ -70,6 +71,7 @@ async fn new_ordinals_indexer_runloop(
     config: &Config,
     ctx: &Context,
 ) -> Result<Indexer, String> {
+    manifest::init_manifest();
     let (commands_tx, commands_rx) =
         crossbeam_channel::bounded(config.resources.indexer_channel_capacity);
     let pg_pools = pg_pools(config);

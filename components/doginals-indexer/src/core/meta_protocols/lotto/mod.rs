@@ -82,26 +82,43 @@ pub enum ResolutionMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LottoDeploy {
+    #[serde(rename = "li")]
     pub lotto_id: String,
+    #[serde(rename = "te")]
     pub template: LottoTemplate,
+    #[serde(rename = "db")]
     pub draw_block: u64,
+    #[serde(rename = "cb")]
     pub cutoff_block: u64,
+    #[serde(rename = "pk")]
     pub ticket_price_koinu: u64,
+    #[serde(rename = "pa")]
     pub prize_pool_address: String,
+    #[serde(rename = "fp")]
     pub fee_percent: u8,
+    #[serde(rename = "mn")]
     pub main_numbers: NumberConfig,
+    #[serde(rename = "bn")]
     pub bonus_numbers: NumberConfig,
+    #[serde(rename = "rm")]
     pub resolution_mode: ResolutionMode,
+    #[serde(rename = "re")]
     pub rollover_enabled: bool,
+    #[serde(rename = "gm")]
     pub guaranteed_min_prize_koinu: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LottoMint {
+    #[serde(rename = "li")]
     pub lotto_id: String,
+    #[serde(rename = "ti")]
     pub ticket_id: String,
+    #[serde(rename = "sn")]
     pub seed_numbers: Vec<u16>,
+    #[serde(rename = "lm")]
     pub luck_marks: Option<Vec<u16>>,
+    #[serde(rename = "tp")]
     pub tip_percent: u8,
 }
 
@@ -109,17 +126,29 @@ pub struct LottoMint {
 struct RawDeploy {
     p: Option<String>,
     op: Option<String>,
+    #[serde(alias = "li")]
     lotto_id: Option<String>,
+    #[serde(alias = "te")]
     template: Option<LottoTemplate>,
+    #[serde(alias = "db")]
     draw_block: Option<u64>,
+    #[serde(alias = "cb")]
     cutoff_block: Option<u64>,
+    #[serde(alias = "pk")]
     ticket_price_koinu: Option<u64>,
+    #[serde(alias = "pa")]
     prize_pool_address: Option<String>,
+    #[serde(alias = "fp")]
     fee_percent: Option<u8>,
+    #[serde(alias = "mn")]
     main_numbers: Option<NumberConfig>,
+    #[serde(alias = "bn")]
     bonus_numbers: Option<NumberConfig>,
+    #[serde(alias = "rm")]
     resolution_mode: Option<ResolutionMode>,
+    #[serde(alias = "re")]
     rollover_enabled: Option<bool>,
+    #[serde(alias = "gm")]
     guaranteed_min_prize_koinu: Option<u64>,
 }
 
@@ -127,10 +156,15 @@ struct RawDeploy {
 struct RawMint {
     p: Option<String>,
     op: Option<String>,
+    #[serde(alias = "li")]
     lotto_id: Option<String>,
+    #[serde(alias = "ti")]
     ticket_id: Option<String>,
+    #[serde(alias = "sn")]
     seed_numbers: Option<Vec<u16>>,
+    #[serde(alias = "lm")]
     luck_marks: Option<Vec<u16>>,
+    #[serde(alias = "tp")]
     tip_percent: Option<u8>,
 }
 
@@ -517,6 +551,7 @@ fn template_matches_config(
     bonus_numbers: &NumberConfig,
     resolution_mode: &ResolutionMode,
     rollover_enabled: bool,
+    #[serde(alias = "gm")]
     guaranteed_min_prize_koinu: Option<u64>,
 ) -> bool {
     if !main_numbers.has_numbers() {

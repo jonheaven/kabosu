@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::Instant;
+
 use bitcoin::ScriptBuf;
 use deadpool_postgres::GenericClient;
 use dogecoin::types::{
@@ -310,7 +310,12 @@ async fn insert_inscriptions<T: GenericClient>(
     if inscriptions.is_empty() {
         return Ok(());
     }
-    for chunk in inscriptions.chunks(500) {
+    let mut current_batch_size = 500usize;
+    let mut current_index = 0usize;
+
+    while current_index < inscriptions.len() {
+        let next_index = (current_index + current_batch_size).min(inscriptions.len());
+        let chunk = &inscriptions[current_index..next_index];
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
         for row in chunk.iter() {
             params.push(&row.inscription_id);
@@ -338,6 +343,7 @@ async fn insert_inscriptions<T: GenericClient>(
             params.push(&row.dogespells);
             params.push(&row.unbound_sequence);
         }
+        let insert_started = Instant::now();
         client
             .query(
                 &format!("INSERT INTO inscriptions
@@ -350,6 +356,15 @@ async fn insert_inscriptions<T: GenericClient>(
             )
             .await
             .map_err(|e| format!("insert_inscriptions: {e}"))?;
+
+        let insert_time_ms = insert_started.elapsed().as_millis();
+        if insert_time_ms < 50 {
+            current_batch_size = (current_batch_size + 150).min(2000);
+        } else if insert_time_ms > 150 {
+            current_batch_size = (current_batch_size - 100).max(250);
+        }
+
+        current_index = next_index;
     }
     Ok(())
 }

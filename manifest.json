@@ -1,0 +1,60 @@
+{
+  "DMP": {
+    "p": "protocol",
+    "v": "version",
+    "op": "op",
+    "lid": "listing_id",
+    "bid": "bid_id",
+    "s": "seller",
+    "pk": "price_koinu",
+    "pc": "psbt_cid",
+    "ex": "expiry_height",
+    "n": "nonce",
+    "sig": "signature"
+  },
+  "DogeLotto": {
+    "p": "p",
+    "op": "op",
+    "li": "lotto_id",
+    "ti": "ticket_id",
+    "te": "template",
+    "db": "draw_block",
+    "cb": "cutoff_block",
+    "pk": "ticket_price_koinu",
+    "pa": "prize_pool_address",
+    "fp": "fee_percent",
+    "mn": "main_numbers",
+    "bn": "bonus_numbers",
+    "rm": "resolution_mode",
+    "re": "rollover_enabled",
+    "gm": "guaranteed_min_prize_koinu",
+    "sn": "seed_numbers",
+    "lm": "luck_marks",
+    "tp": "tip_percent"
+  },
+  "DRC-20": {
+    "p": "p",
+    "op": "op",
+    "tick": "tick",
+    "max": "max",
+    "lim": "lim",
+    "amt": "amt"
+  },
+  "DNS": {
+    "p": "p",
+    "op": "op",
+    "name": "name"
+  },
+  "Dogemap": {
+    "p": "p",
+    "op": "op",
+    "block": "block",
+    "name": "name"
+  },
+  "DogeSpells": {
+    "format": "cbor_op_return"
+  },
+  "Dogetag": {
+    "format": "text_plain"
+  }
+}
