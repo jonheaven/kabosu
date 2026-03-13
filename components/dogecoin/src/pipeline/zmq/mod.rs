@@ -12,7 +12,7 @@ use crate::{
         BlockProcessor, BlockProcessorCommand,
     },
     try_info, try_warn,
-    types::{DogecoinNetwork, BlockBytesCursor},
+    types::{BlockBytesCursor, DogecoinNetwork},
     utils::Context,
 };
 

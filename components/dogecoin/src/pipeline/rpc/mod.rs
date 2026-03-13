@@ -16,8 +16,8 @@ use crate::{
     try_debug,
     types::{
         dogecoin::{OutPoint, TxIn, TxOut},
-        DogecoinBlockData, DogecoinBlockMetadata, DogecoinNetwork, DogecoinTransactionData,
-        DogecoinTransactionMetadata, BlockHeader, BlockIdentifier, TransactionIdentifier,
+        BlockHeader, BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata, DogecoinNetwork,
+        DogecoinTransactionData, DogecoinTransactionMetadata, TransactionIdentifier,
     },
     utils::{bitcoind::dogecoin_get_client, Context},
 };
@@ -421,16 +421,23 @@ pub(crate) fn standardize_dogecoin_block(
                     // Dogecoin Core dropping connections under concurrent load.
                     const MAX_PREVOUT_RETRIES: u32 = 4;
                     let mut last_err = String::new();
-                    let mut prevout_result: Option<BitcoinTransactionInputPrevoutFullBreakdown> = None;
+                    let mut prevout_result: Option<BitcoinTransactionInputPrevoutFullBreakdown> =
+                        None;
 
                     for attempt in 0..MAX_PREVOUT_RETRIES {
                         if attempt > 0 {
                             try_debug!(
                                 ctx,
                                 "retrying prevout RPC for tx {} input #{} (attempt {}/{}): {}",
-                                tx.txid, index, attempt, MAX_PREVOUT_RETRIES, last_err
+                                tx.txid,
+                                index,
+                                attempt,
+                                MAX_PREVOUT_RETRIES,
+                                last_err
                             );
-                            std::thread::sleep(std::time::Duration::from_millis(500 * attempt as u64));
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                500 * attempt as u64,
+                            ));
                         }
 
                         // Fresh client each attempt — avoids reusing a half-closed TCP connection.
@@ -441,18 +448,27 @@ pub(crate) fn standardize_dogecoin_block(
                             &[json!(input_txid), json!(true)],
                         ) {
                             Ok(v) => v,
-                            Err(e) => { last_err = format!("getrawtransaction {input_txid}: {e}"); continue; }
-                        };
-
-                        let parent_tx: RpcTransactionValueBreakdown = match serde_json::from_value(parent_tx_value) {
-                            Ok(v) => v,
                             Err(e) => {
-                                last_err = format!("decode parent tx {input_txid}: {e}");
+                                last_err = format!("getrawtransaction {input_txid}: {e}");
                                 continue;
                             }
                         };
 
-                        let value = match parent_tx.vout.iter().find(|o| o.n == vout).map(|o| o.value) {
+                        let parent_tx: RpcTransactionValueBreakdown =
+                            match serde_json::from_value(parent_tx_value) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    last_err = format!("decode parent tx {input_txid}: {e}");
+                                    continue;
+                                }
+                            };
+
+                        let value = match parent_tx
+                            .vout
+                            .iter()
+                            .find(|o| o.n == vout)
+                            .map(|o| o.value)
+                        {
                             Some(v) => v,
                             None => {
                                 // Non-transient error — fail immediately.
@@ -483,7 +499,10 @@ pub(crate) fn standardize_dogecoin_block(
                             Ok(h) => h,
                             Err(e) => {
                                 return Err((
-                                    format!("invalid parent blockhash {} for tx {}: {}", blockhash_str, input_txid, e),
+                                    format!(
+                                        "invalid parent blockhash {} for tx {}: {}",
+                                        blockhash_str, input_txid, e
+                                    ),
                                     true,
                                 ));
                             }
@@ -497,14 +516,20 @@ pub(crate) fn standardize_dogecoin_block(
                             &[json!(blockhash.to_string()), json!(true)],
                         ) {
                             Ok(v) => v,
-                            Err(e) => { last_err = format!("getblockheader {blockhash}: {e}"); continue; }
+                            Err(e) => {
+                                last_err = format!("getblockheader {blockhash}: {e}");
+                                continue;
+                            }
                         };
 
                         let parent_height = match height_val["height"].as_u64() {
                             Some(h) => h,
                             None => {
                                 return Err((
-                                    format!("missing height in block header {} for tx {}", blockhash, input_txid),
+                                    format!(
+                                        "missing height in block header {} for tx {}",
+                                        blockhash, input_txid
+                                    ),
                                     true,
                                 ));
                             }

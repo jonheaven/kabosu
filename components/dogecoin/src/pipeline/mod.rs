@@ -13,14 +13,12 @@ use reqwest::Client;
 
 use crate::{
     block_pool::BlockPool,
-    pipeline::{
-        rpc::{
-            download_and_parse_block_with_retry, pipeline::start_block_download_pipeline,
-            standardize_dogecoin_block,
-        },
+    pipeline::rpc::{
+        download_and_parse_block_with_retry, pipeline::start_block_download_pipeline,
+        standardize_dogecoin_block,
     },
     try_debug, try_info,
-    types::{DogecoinBlockData, DogecoinNetwork, BlockIdentifier, BlockchainEvent},
+    types::{BlockIdentifier, BlockchainEvent, DogecoinBlockData, DogecoinNetwork},
     utils::{AbstractBlock, BlockHeights, Context, MAX_BLOCK_HEIGHTS_ENTRIES},
     Indexer, IndexerCommand,
 };
@@ -276,7 +274,8 @@ pub(crate) async fn block_processor_runloop(
 ) -> Result<(), String> {
     // Before starting the loop, check if the index already has progress. If so, prime the block pool with the current tip.
     if let Some(index_chain_tip) = index_chain_tip {
-        if index_chain_tip.index >= sequence_start_block_height && index_chain_tip.has_known_hash() {
+        if index_chain_tip.index >= sequence_start_block_height && index_chain_tip.has_known_hash()
+        {
             initialize_block_pool(block_pool, index_chain_tip, http_client, config, ctx).await?;
         } else if index_chain_tip.index >= sequence_start_block_height {
             try_info!(

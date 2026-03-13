@@ -105,6 +105,10 @@ kabosu doginals index scan --from 5000000 --to 5001000 --reveals-only | jq -r '.
 kabosu doginals index refresh-blk-index
 ```
 
+Set `DOGECOIN_DATA_DIR` (or `dogecoin.dogecoin_data_dir` in config) when Core
+does not use the platform default data directory. The shadow copy defaults to
+`<dogecoin-data-dir>/<network>/blk-index`.
+
 **Output example:**
 ```
 BlkReader: index copy refreshed (3 updated, 1247 unchanged) → C:/Users/<USER>/Desktop/

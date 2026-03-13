@@ -431,7 +431,8 @@ pub enum IndexCommand {
     /// Refresh the shadow copy of Dogecoin Core's LevelDB block index used by
     /// the direct .blk file reader. Run this once while Dogecoin Core is
     /// running to populate the index copy; subsequent syncs will refresh it
-    /// automatically. Requires `dogecoin.dogecoin_data_dir` in the config.
+    /// automatically. Uses `DOGECOIN_DATA_DIR` (or `dogecoin.dogecoin_data_dir`)
+    /// and defaults the copy location to `<dogecoin-data-dir>/<network>/blk-index`.
     #[clap(name = "refresh-blk-index", bin_name = "refresh-blk-index")]
     RefreshBlkIndex(RefreshBlkIndexCommand),
 }

@@ -72,4 +72,3 @@ pub fn try_parse_dogetag(script_hex: &str) -> Option<String> {
 
     Some(message.to_string())
 }
-

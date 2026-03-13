@@ -7,9 +7,9 @@ pub mod test_builders;
 use std::{hash::BuildHasherDefault, ops::Div};
 
 use bitcoin::Network;
-use dogecoin::{types::TransactionBytesCursor, utils::Context};
 use config::Config;
 use dashmap::DashMap;
+use dogecoin::{types::TransactionBytesCursor, utils::Context};
 use fxhash::{FxBuildHasher, FxHasher};
 
 pub fn first_inscription_height(config: &Config) -> u64 {

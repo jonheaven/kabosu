@@ -201,10 +201,11 @@ pub fn try_parse_lotto_mint(body: &[u8]) -> Option<LottoMint> {
 
     let lotto_id = normalize_lotto_id(raw.lotto_id?)?;
     let ticket_id = normalize_ticket_id(raw.ticket_id?)?;
-    let luck_marks = raw
-        .luck_marks
-        .map(|numbers| normalize_seed_numbers(numbers, GLOBAL_NUMBER_MAX))
-        .transpose()?;
+    let luck_marks = if let Some(numbers) = raw.luck_marks {
+        Some(normalize_seed_numbers(numbers, GLOBAL_NUMBER_MAX)?)
+    } else {
+        None
+    };
     let seed_numbers = if let Some(seed_numbers) = raw.seed_numbers {
         normalize_seed_numbers(seed_numbers, GLOBAL_NUMBER_MAX)?
     } else if let Some(luck_marks) = &luck_marks {

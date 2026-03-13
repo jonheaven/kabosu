@@ -1,16 +1,16 @@
 use std::{collections::HashMap, num::NonZeroUsize, str::FromStr};
 
 use bitcoin::{Network, ScriptBuf};
+use config::{Config, DogecoinConfig};
+use deadpool_postgres::{Pool, Transaction};
 use dogecoin::{
     bitcoincore_rpc::Client as BitcoinRpcClient,
     try_debug, try_error, try_warn,
     types::dogecoin::TxIn,
     utils::{bitcoind::dogecoin_get_client, Context},
 };
-use config::{DogecoinConfig, Config};
-use deadpool_postgres::{Pool, Transaction};
+use doginals_parser::{Cenotaph, Dune, DuneId, Dunestone, Edict, Etching, Height};
 use lru::LruCache;
-use doginals_parser::{Cenotaph, Edict, Etching, Height, Dune, DuneId, Dunestone};
 use postgres::pg_pool_client;
 
 use super::{
@@ -566,8 +566,8 @@ impl IndexCache {
 #[cfg(test)]
 mod tests {
     use bitcoin::{absolute::LockTime, transaction::Version, Transaction};
-    use dogecoin::utils::Context;
     use config::{Config, PgDatabaseConfig};
+    use dogecoin::utils::Context;
     use doginals_parser::Dune;
     use postgres::{pg_begin, pg_pool, pg_pool_client};
 

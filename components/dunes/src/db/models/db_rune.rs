@@ -1,4 +1,4 @@
-use doginals_parser::{Etching, Dune, DuneId, SpacedDune};
+use doginals_parser::{Dune, DuneId, Etching, SpacedDune};
 use postgres::types::{PgBigIntU32, PgNumericU128, PgNumericU64, PgSmallIntU8};
 use tokio_postgres::Row;
 

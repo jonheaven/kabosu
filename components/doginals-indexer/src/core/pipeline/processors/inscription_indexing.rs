@@ -500,9 +500,7 @@ pub async fn index_block(
 
         // DMP — index all market operations detected in this block
         if !dmp_ops.is_empty() {
-            if let Err(e) =
-                doginals_pg::insert_dmp_ops(&dmp_ops, &ord_tx).await
-            {
+            if let Err(e) = doginals_pg::insert_dmp_ops(&dmp_ops, &ord_tx).await {
                 return Err(format!("Failed to insert DMP operations: {}", e));
             }
             try_info!(

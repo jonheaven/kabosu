@@ -13,11 +13,12 @@
 //!
 //! Dogecoin Core holds an exclusive LevelDB lock on `blocks/index/` while
 //! running. To work around this, kabosu maintains a **shadow copy** of the
-//! index at `<data-dir>/blk-index/`. The copy is refreshed automatically
-//! each time the indexer starts. A smart-copy strategy is used: immutable
-//! `.ldb` files are skipped once they already exist; only the MANIFEST and
-//! WAL are re-copied on each run (usually < 1 second). The `LOCK` file is
-//! never copied so kabosu can open the shadow copy freely.
+//! index inside the active Dogecoin Core network data dir at
+//! `<dogecoin-data-dir>/<network>/blk-index/`. The copy is refreshed
+//! automatically each time the indexer starts. A smart-copy strategy is used:
+//! immutable `.ldb` files are skipped once they already exist; only the
+//! MANIFEST and WAL are re-copied on each run (usually < 1 second). The
+//! `LOCK` file is never copied so kabosu can open the shadow copy freely.
 //!
 //! ## Prevout values
 //!
@@ -47,8 +48,8 @@ use crate::{
     try_info, try_warn,
     types::{
         dogecoin::{OutPoint, TxIn, TxOut},
-        DogecoinBlockData, DogecoinBlockMetadata, DogecoinNetwork, DogecoinTransactionData,
-        DogecoinTransactionMetadata, BlockIdentifier, TransactionIdentifier,
+        BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata, DogecoinNetwork,
+        DogecoinTransactionData, DogecoinTransactionMetadata, TransactionIdentifier,
     },
     utils::Context,
 };
@@ -70,7 +71,7 @@ impl BlkReader {
     ///
     /// `blocks_dir` is the `blocks/` directory inside the Dogecoin Core data
     /// directory. `index_copy_dir` is where kabosu stores its shadow copy of
-    /// Core's LevelDB index (e.g. `<data-dir>/blk-index`).
+    /// Core's LevelDB index (e.g. `<dogecoin-data-dir>/<network>/blk-index`).
     ///
     /// Returns `Ok(None)` when the index cannot be opened, in which case the
     /// caller should fall back to RPC.
@@ -113,7 +114,10 @@ impl BlkReader {
                         index: Arc::new(idx),
                     });
                 }
-                Err(e) => try_warn!(ctx, "BlkReader: shadow copy unusable ({e}), trying live index"),
+                Err(e) => try_warn!(
+                    ctx,
+                    "BlkReader: shadow copy unusable ({e}), trying live index"
+                ),
             }
         }
 
@@ -171,9 +175,15 @@ impl BlkReader {
         let Some(&(file_idx, data_offset, ref block_hash)) = self.index.get(&height) else {
             return Ok(None);
         };
-        let block =
-            read_dogecoin_block(&self.blocks_dir, file_idx, data_offset, height, block_hash, network)
-                .map_err(|e| format!("BlkReader: reading block at height {height}: {e}"))?;
+        let block = read_dogecoin_block(
+            &self.blocks_dir,
+            file_idx,
+            data_offset,
+            height,
+            block_hash,
+            network,
+        )
+        .map_err(|e| format!("BlkReader: reading block at height {height}: {e}"))?;
         Ok(Some(block))
     }
 
@@ -198,13 +208,12 @@ impl BlkReader {
 /// the destination (by mtime). Immutable `.ldb` files are skipped after the
 /// first copy. Returns `(copied, skipped)` counts.
 pub fn refresh_index_copy(live_index: &Path, copy_dir: &Path) -> Result<(u32, u32), String> {
-    fs::create_dir_all(copy_dir)
-        .map_err(|e| format!("creating {}: {e}", copy_dir.display()))?;
+    fs::create_dir_all(copy_dir).map_err(|e| format!("creating {}: {e}", copy_dir.display()))?;
 
     let (mut copied, mut skipped) = (0u32, 0u32);
 
-    let entries = fs::read_dir(live_index)
-        .map_err(|e| format!("reading {}: {e}", live_index.display()))?;
+    let entries =
+        fs::read_dir(live_index).map_err(|e| format!("reading {}: {e}", live_index.display()))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
@@ -392,8 +401,7 @@ fn read_dogecoin_block(
     network: &DogecoinNetwork,
 ) -> Result<DogecoinBlockData, String> {
     let path = blk_dir.join(format!("blk{:05}.dat", file_idx));
-    let file = fs::File::open(&path)
-        .map_err(|e| format!("opening {}: {e}", path.display()))?;
+    let file = fs::File::open(&path).map_err(|e| format!("opening {}: {e}", path.display()))?;
     let mut reader = BufReader::new(file);
 
     reader
@@ -445,8 +453,8 @@ pub fn parse_dogecoin_block(
     }
 
     // Transaction count
-    let tx_count = read_compact_size(&mut cur)
-        .map_err(|e| format!("reading tx_count: {e}"))? as usize;
+    let tx_count =
+        read_compact_size(&mut cur).map_err(|e| format!("reading tx_count: {e}"))? as usize;
 
     // Parse each transaction
     let mut transactions = Vec::with_capacity(tx_count);
@@ -603,7 +611,10 @@ fn read_raw_tx(
         let script_len = read_compact_size(cur)? as usize;
         let mut script_pubkey = vec![0u8; script_len];
         cur.read_exact(&mut script_pubkey)?;
-        raw_outputs.push(RawTxOut { value, script_pubkey });
+        raw_outputs.push(RawTxOut {
+            value,
+            script_pubkey,
+        });
     }
 
     let _locktime = cur.read_u32::<LittleEndian>()?;
@@ -689,8 +700,14 @@ pub fn read_block_by_height(
     let Some(&(file_idx, data_offset, ref block_hash)) = index.get(&height) else {
         return Ok(None);
     };
-    let block = read_dogecoin_block(blocks_dir, file_idx, data_offset, height, block_hash, network)
-        .map_err(|e| format!("height {height}: {e}"))?;
+    let block = read_dogecoin_block(
+        blocks_dir,
+        file_idx,
+        data_offset,
+        height,
+        block_hash,
+        network,
+    )
+    .map_err(|e| format!("height {height}: {e}"))?;
     Ok(Some(block))
 }
-

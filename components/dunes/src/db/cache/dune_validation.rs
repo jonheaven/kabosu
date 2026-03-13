@@ -30,8 +30,8 @@ mod tests {
         opcodes, script::Builder, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
         Witness,
     };
+    use config::{Config, DogecoinConfig, DogecoinDataSource};
     use dogecoin::utils::{bitcoind::dogecoin_get_client, Context};
-    use config::{DogecoinConfig, DogecoinDataSource, Config};
     use doginals_parser::{Dune, SpacedDune};
 
     use super::*;

@@ -5,21 +5,21 @@ use std::{
 };
 
 use bitcoin::Network;
+use config::Config;
+use crossbeam_channel::unbounded;
+use dashmap::DashMap;
+use deadpool_postgres::Transaction;
 use dogecoin::{
     try_debug, try_error, try_info,
     types::{
-        DogecoinBlockData, DogecoinNetwork, DogecoinTransactionData, BlockIdentifier,
+        BlockIdentifier, DogecoinBlockData, DogecoinNetwork, DogecoinTransactionData,
         OrdinalInscriptionCurseType, OrdinalInscriptionTransferDestination, OrdinalOperation,
         TransactionBytesCursor, TransactionIdentifier,
     },
     utils::Context,
 };
-use config::Config;
-use crossbeam_channel::unbounded;
-use dashmap::DashMap;
-use deadpool_postgres::Transaction;
-use fxhash::FxHasher;
 use doginals::{dogespell::Dogespell, koinu::Koinu};
+use fxhash::FxHasher;
 
 use super::{
     koinu_numbering::{compute_koinu_number, TraversalResult},
@@ -111,17 +111,16 @@ pub fn parallelize_inscription_data_computations(
                     prioritary,
                 ))) = rx.recv()
                 {
-                    let traversal: Result<(TraversalResult, u64, _), String> =
-                        compute_koinu_number(
-                            &block_identifier,
-                            &transaction_id,
-                            input_index,
-                            inscription_pointer,
-                            &local_cache,
-                            &local_db,
-                            &moved_config,
-                            &moved_ctx,
-                        );
+                    let traversal: Result<(TraversalResult, u64, _), String> = compute_koinu_number(
+                        &block_identifier,
+                        &transaction_id,
+                        input_index,
+                        inscription_pointer,
+                        &local_cache,
+                        &local_db,
+                        &moved_config,
+                        &moved_ctx,
+                    );
                     let _ = moved_traversal_tx.send((traversal, prioritary, thread_index));
                 }
             })

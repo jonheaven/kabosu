@@ -1,5 +1,5 @@
 use dogecoin::types::OrdinalInscriptionRevealData;
-use doginals::{rarity::Rarity, koinu::Koinu};
+use doginals::{koinu::Koinu, rarity::Rarity};
 use postgres::{types::PgNumericU64, FromPgRow};
 use tokio_postgres::Row;
 

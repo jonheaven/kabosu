@@ -2,8 +2,8 @@ use std::collections::{HashMap, VecDeque};
 
 use bitcoin::{Address, ScriptBuf};
 use dogecoin::{try_debug, try_warn, types::dogecoin::TxIn, utils::Context};
-use lru::LruCache;
 use doginals_parser::DuneId;
+use lru::LruCache;
 use tokio_postgres::Transaction;
 
 use super::{input_rune_balance::InputRuneBalance, transaction_location::TransactionLocation};
@@ -301,8 +301,8 @@ mod test {
 
         use bitcoin::ScriptBuf;
         use dogecoin::utils::Context;
-        use maplit::hashmap;
         use doginals_parser::DuneId;
+        use maplit::hashmap;
 
         use crate::db::{
             cache::{
@@ -677,9 +677,9 @@ mod test {
             },
             utils::Context,
         };
+        use doginals_parser::DuneId;
         use lru::LruCache;
         use maplit::hashmap;
-        use doginals_parser::DuneId;
 
         use crate::db::{
             cache::{
@@ -886,9 +886,9 @@ mod test {
     mod cache_move {
         use std::num::NonZeroUsize;
 
+        use doginals_parser::DuneId;
         use lru::LruCache;
         use maplit::hashmap;
-        use doginals_parser::DuneId;
 
         use crate::db::cache::{
             input_rune_balance::InputRuneBalance, utils::move_block_output_cache_to_output_cache,

@@ -21,18 +21,18 @@ use std::{
     thread::JoinHandle,
 };
 
+use config::Config;
+use db::{
+    blocks::{self, find_last_block_inserted, open_blocks_db_with_retry},
+    doginals_pg, migrate_dbs,
+};
+use deadpool_postgres::Pool;
 use dogecoin::{
     start_dogecoin_indexer, try_debug, try_info,
     types::BlockIdentifier,
     utils::{future_block_on, Context},
     Indexer, IndexerCommand,
 };
-use config::Config;
-use db::{
-    blocks::{self, find_last_block_inserted, open_blocks_db_with_retry},
-    migrate_dbs, doginals_pg,
-};
-use deadpool_postgres::Pool;
 use postgres::{pg_pool, pg_pool_client};
 use utils::monitoring::{start_serving_prometheus_metrics, PrometheusMonitoring};
 
@@ -211,8 +211,8 @@ async fn new_ordinals_indexer_runloop(
 
 // Re-export row types so callers (CLI) don't need to reach into db internals.
 pub use db::doginals_pg::{
-    DmpListingRow, DnsNameRow, DogemapClaimRow, LottoStatusRow, LottoSummaryRow,
-    LottoTicketCardRow, LottoWinnerRow, BurnPointsRow, LottoTicketInfoRow,
+    BurnPointsRow, DmpListingRow, DnsNameRow, DogemapClaimRow, LottoStatusRow, LottoSummaryRow,
+    LottoTicketCardRow, LottoTicketInfoRow, LottoWinnerRow,
 };
 
 /// List active DMP listings.
@@ -295,7 +295,6 @@ pub async fn lotto_list(
 
 /// Get lotto ticket info by inscription ID (for burn detection).
 
-
 /// List lotto tickets for a specific lotto deployment.
 pub async fn lotto_list_tickets(
     lotto_id: &str,
@@ -339,14 +338,12 @@ pub async fn lotto_get_top_burners(
 pub async fn get_chain_tip(config: &Config) -> Result<BlockIdentifier, String> {
     let pool = pg_pool(&config.doginals.as_ref().unwrap().db)?;
     let ord_client = pg_pool_client(&pool).await?;
-    Ok(
-        db::doginals_pg::get_chain_tip(&ord_client)
-            .await?
-            .unwrap_or(BlockIdentifier {
-                index: first_inscription_height(config) - 1,
-                hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
-            }),
-    )
+    Ok(db::doginals_pg::get_chain_tip(&ord_client)
+        .await?
+        .unwrap_or(BlockIdentifier {
+            index: first_inscription_height(config) - 1,
+            hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
+        }))
 }
 
 pub async fn rollback_block_range(
@@ -466,7 +463,9 @@ pub async fn scan_doginals<W: Write + Send + 'static>(
     use dogecoin::{types::OrdinalOperation, IndexerCommand};
 
     if from_block > to_block {
-        return Err(format!("--from ({from_block}) must be <= --to ({to_block})"));
+        return Err(format!(
+            "--from ({from_block}) must be <= --to ({to_block})"
+        ));
     }
 
     // Build a scan config: same as the caller's config but with the exact range.
@@ -479,9 +478,8 @@ pub async fn scan_doginals<W: Write + Send + 'static>(
     let found_moved = found.clone();
 
     // Channel for blocks coming in from the dogecoin pipeline.
-    let (commands_tx, commands_rx) = bounded::<IndexerCommand>(
-        config.resources.indexer_channel_capacity,
-    );
+    let (commands_tx, commands_rx) =
+        bounded::<IndexerCommand>(config.resources.indexer_channel_capacity);
 
     let config_moved = config.clone();
     let ctx_moved = ctx.clone();

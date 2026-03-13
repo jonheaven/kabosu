@@ -418,6 +418,7 @@ See [SETUP.md](SETUP.md) for a step-by-step setup guide.
 2. Set RPC credentials:
 
    ```bash
+   export DOGECOIN_DATA_DIR=/path/to/dogecoin-data   # optional if Core uses the default data dir
    export DOGE_RPC_USERNAME=youruser
    export DOGE_RPC_PASSWORD=yourpass
    ```
@@ -425,9 +426,15 @@ See [SETUP.md](SETUP.md) for a step-by-step setup guide.
    PowerShell:
 
    ```powershell
+   $env:DOGECOIN_DATA_DIR="F:\DogecoinData"          # optional if Core uses the default data dir
    $env:DOGE_RPC_USERNAME="youruser"
    $env:DOGE_RPC_PASSWORD="yourpass"
    ```
+
+   When `DOGECOIN_DATA_DIR` is unset, kabosu auto-detects Dogecoin Core's
+   default data directory. The shadow blk-index copy now defaults to
+   `<dogecoin-data-dir>/<network>/blk-index`, so it stays on the same drive as
+   the node by default.
 
    Optional `.env` workflow (repo root):
 

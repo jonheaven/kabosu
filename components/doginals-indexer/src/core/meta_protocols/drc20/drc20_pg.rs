@@ -112,10 +112,7 @@ pub async fn get_unsent_token_transfers<T: GenericClient>(
     Ok(results)
 }
 
-pub async fn insert_tokens<T: GenericClient>(
-    tokens: &[DbToken],
-    client: &T,
-) -> Result<(), String> {
+pub async fn insert_tokens<T: GenericClient>(tokens: &[DbToken], client: &T) -> Result<(), String> {
     if tokens.is_empty() {
         return Ok(());
     }
@@ -497,10 +494,10 @@ pub async fn rollback_block_operations<T: GenericClient>(
 mod test {
     use std::collections::HashMap;
 
+    use deadpool_postgres::GenericClient;
     use dogecoin::types::{
         BlockIdentifier, OrdinalInscriptionTransferDestination, TransactionIdentifier,
     };
-    use deadpool_postgres::GenericClient;
     use postgres::{
         pg_begin, pg_pool_client,
         types::{PgBigIntU32, PgNumericU128, PgNumericU64, PgSmallIntU8},
@@ -509,8 +506,8 @@ mod test {
 
     use crate::{
         core::meta_protocols::drc20::{
-            drc20_pg::{self, get_token_minted_supply},
             cache::Brc20MemoryCache,
+            drc20_pg::{self, get_token_minted_supply},
             models::{DbOperation, DbToken},
             test_utils::{Brc20RevealBuilder, Drc20TransferBuilder},
             verifier::{

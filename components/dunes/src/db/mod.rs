@@ -1,14 +1,14 @@
 use std::{collections::HashMap, process, str::FromStr};
 
-use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
 use cache::input_rune_balance::InputRuneBalance;
 use config::Config;
 use deadpool_postgres::GenericClient;
+use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
+use doginals_parser::DuneId;
 use models::{
     db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry, db_rune::DbDune,
     db_supply_change::DbSupplyChange,
 };
-use doginals_parser::DuneId;
 use postgres::{
     pg_connect_with_retry,
     types::{PgBigIntU32, PgNumericU128, PgNumericU64},

@@ -1,5 +1,5 @@
 # Kabosu Configuration
-# Generated from F:\DogecoinData\dogecoin.conf
+# Dogecoin Core location is read from DOGECOIN_DATA_DIR by the shared launch scripts.
 
 [storage]
 working_dir = "data"
@@ -51,7 +51,7 @@ port = 5432
 username = "postgres"
 password = "postgres"
 
-# Dogecoin RPC connection (from F:\DogecoinData\dogecoin.conf)
+# Dogecoin RPC connection
 [dogecoin]
 network = "mainnet"
 rpc_url = "http://127.0.0.1:22555"
@@ -59,9 +59,12 @@ rpc_url = "http://127.0.0.1:22555"
 # You may also set them here, but do not commit credentials to git.
 zmq_url = "tcp://127.0.0.1:28332"
 # Path to Dogecoin blockchain data directory for faster .blk file indexing (5-20× faster than RPC)
-dogecoin_data_dir = "F:\\DogecoinData"
-# Shared shadow copy of blocks/index to avoid duplicating ~LevelDB files in this repo data dir.
-blk_index_copy_dir = "C:/Users/jheav/Desktop/blk-index"  # Local user path for scripts
+# DOGECOIN_DATA_DIR is the primary source of truth for Dogecoin Core's data dir.
+# When unset, kabosu auto-detects the platform default Dogecoin data directory.
+# dogecoin_data_dir = "F:\\DogecoinData"
+# Optional override for the shadow copy location. Leave unset to keep the copy
+# inside the active Dogecoin network data dir (for example F:\DogecoinData\blk-index).
+# blk_index_copy_dir = "F:\\DogecoinData\\blk-index"
 
 # Protocol enable/disable switches.
 # Set enabled = false to skip indexing that protocol entirely.

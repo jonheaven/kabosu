@@ -1,4 +1,8 @@
-use std::{fmt, path::PathBuf, str::FromStr};
+use std::{
+    env, fmt,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use bitcoin::Network;
 
@@ -205,9 +209,9 @@ pub struct DogecoinConfig {
     /// Optional path where kabosu stores/reads its shadow copy of
     /// Dogecoin Core's `blocks/index` LevelDB.
     ///
-    /// Defaults to `<storage.working_dir>/blk-index` when unset.
-    /// Use this to keep the copy on a larger/faster drive (e.g. `F:`), or
-    /// to share a single copy across multiple indexer workspaces.
+    /// Defaults to `<dogecoin_data_dir>/<network>/blk-index` when unset so
+    /// kabosu can share the same shadow copy location as other local tools.
+    /// Use this only to force a non-standard location.
     pub blk_index_copy_dir: Option<String>,
     /// Controls whether to use direct `.blk` file reads or JSON-RPC for
     /// historical block ingestion. Defaults to `Auto`.
@@ -265,6 +269,40 @@ impl ResourcesConfig {
 impl Config {
     pub fn from_file_path(file_path: &str) -> Result<Config, String> {
         ConfigToml::config_from_file_path(file_path)
+    }
+
+    pub fn effective_dogecoin_data_dir(&self) -> Option<PathBuf> {
+        self.dogecoin
+            .dogecoin_data_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(default_dogecoin_data_dir)
+    }
+
+    pub fn effective_dogecoin_network_dir(&self) -> Option<PathBuf> {
+        let data_dir = self.effective_dogecoin_data_dir()?;
+        Some(join_dogecoin_network_dir(&data_dir, self.dogecoin.network))
+    }
+
+    pub fn effective_dogecoin_conf_path(&self) -> Option<PathBuf> {
+        self.effective_dogecoin_data_dir()
+            .map(|data_dir| data_dir.join("dogecoin.conf"))
+    }
+
+    pub fn effective_dogecoin_blocks_dir(&self) -> Option<PathBuf> {
+        self.effective_dogecoin_network_dir()
+            .map(|data_dir| data_dir.join("blocks"))
+    }
+
+    pub fn effective_blk_index_copy_dir(&self) -> Option<PathBuf> {
+        self.dogecoin
+            .blk_index_copy_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(|| {
+                self.effective_dogecoin_network_dir()
+                    .map(|data_dir| data_dir.join("blk-index"))
+            })
     }
 
     pub fn expected_cache_path(&self) -> PathBuf {
@@ -431,3 +469,74 @@ pub fn default_cache_path() -> String {
     format!("{}", cache_path.display())
 }
 
+fn default_dogecoin_data_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("Dogecoin"))
+    } else if cfg!(target_os = "macos") {
+        env::var_os("HOME").map(PathBuf::from).map(|path| {
+            path.join("Library")
+                .join("Application Support")
+                .join("Dogecoin")
+        })
+    } else {
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|path| path.join(".dogecoin"))
+    }
+}
+
+fn join_dogecoin_network_dir(data_dir: &Path, network: Network) -> PathBuf {
+    match network {
+        Network::Bitcoin => data_dir.to_path_buf(),
+        Network::Testnet => data_dir.join("testnet3"),
+        Network::Regtest => data_dir.join("regtest"),
+        _ => data_dir.join("signet"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dogecoin_paths_default_inside_network_data_dir() {
+        let mut config = Config::mainnet_default();
+        config.dogecoin.dogecoin_data_dir = Some("/dogecoin/data".into());
+        config.dogecoin.network = Network::Testnet;
+
+        assert_eq!(
+            config.effective_dogecoin_blocks_dir(),
+            Some(
+                PathBuf::from("/dogecoin/data")
+                    .join("testnet3")
+                    .join("blocks")
+            )
+        );
+        assert_eq!(
+            config.effective_blk_index_copy_dir(),
+            Some(
+                PathBuf::from("/dogecoin/data")
+                    .join("testnet3")
+                    .join("blk-index")
+            )
+        );
+        assert_eq!(
+            config.effective_dogecoin_conf_path(),
+            Some(PathBuf::from("/dogecoin/data").join("dogecoin.conf"))
+        );
+    }
+
+    #[test]
+    fn explicit_blk_index_copy_dir_override_wins() {
+        let mut config = Config::mainnet_default();
+        config.dogecoin.dogecoin_data_dir = Some("/dogecoin/data".into());
+        config.dogecoin.blk_index_copy_dir = Some("/custom/blk-index".into());
+
+        assert_eq!(
+            config.effective_blk_index_copy_dir(),
+            Some(PathBuf::from("/custom/blk-index"))
+        );
+    }
+}

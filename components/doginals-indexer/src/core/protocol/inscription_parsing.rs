@@ -1,16 +1,18 @@
 use std::{collections::HashMap, str, str::FromStr};
 
-use bitcoin::{hash_types::Txid, ScriptBuf, Transaction, TxIn as BitcoinTxIn, Witness, OutPoint, Sequence};
+use bitcoin::{
+    hash_types::Txid, OutPoint, ScriptBuf, Sequence, Transaction, TxIn as BitcoinTxIn, Witness,
+};
+use config::Config;
 use dogecoin::{
     try_debug, try_warn,
     types::{
-        dogecoin::TxOut, BlockIdentifier, DogecoinBlockData, DogecoinNetwork, DogecoinTransactionData,
-        OrdinalInscriptionCurseType, OrdinalInscriptionNumber, OrdinalInscriptionRevealData,
-        OrdinalOperation,
+        dogecoin::TxOut, BlockIdentifier, DogecoinBlockData, DogecoinNetwork,
+        DogecoinTransactionData, OrdinalInscriptionCurseType, OrdinalInscriptionNumber,
+        OrdinalInscriptionRevealData, OrdinalOperation,
     },
     utils::Context,
 };
-use config::Config;
 use doginals::{
     envelope::{Envelope, ParsedEnvelope},
     inscription::Inscription,
@@ -164,11 +166,11 @@ pub fn parse_inscriptions_from_standardized_tx(
     ctx: &Context,
 ) -> Vec<OrdinalOperation> {
     let mut operations = vec![];
-    
+
     // Dogecoin uses script_sig for inscriptions, not witness data.
     // We need to convert the Dogecoin transaction data into a Bitcoin Transaction
     // so we can use the envelope parsing logic.
-    
+
     if tx.metadata.inputs.is_empty() {
         return operations;
     }
@@ -177,31 +179,36 @@ pub fn parse_inscriptions_from_standardized_tx(
     let bitcoin_tx = Transaction {
         version: bitcoin::transaction::Version(2),
         lock_time: bitcoin::blockdata::locktime::absolute::LockTime::ZERO,
-        input: tx.metadata.inputs.iter().map(|input| {
-            // Decode the script_sig from hex string
-            let script_bytes = if input.script_sig.starts_with("0x") {
-                hex::decode(&input.script_sig[2..]).unwrap_or_default()
-            } else {
-                hex::decode(&input.script_sig).unwrap_or_default()
-            };
-            
-            BitcoinTxIn {
-                previous_output: OutPoint::null(),
-                script_sig: ScriptBuf::from_bytes(script_bytes),
-                sequence: Sequence::from_consensus(input.sequence),
-                witness: Witness::new(), // Dogecoin doesn't use witness
-            }
-        }).collect(),
+        input: tx
+            .metadata
+            .inputs
+            .iter()
+            .map(|input| {
+                // Decode the script_sig from hex string
+                let script_bytes = if input.script_sig.starts_with("0x") {
+                    hex::decode(&input.script_sig[2..]).unwrap_or_default()
+                } else {
+                    hex::decode(&input.script_sig).unwrap_or_default()
+                };
+
+                BitcoinTxIn {
+                    previous_output: OutPoint::null(),
+                    script_sig: ScriptBuf::from_bytes(script_bytes),
+                    sequence: Sequence::from_consensus(input.sequence),
+                    witness: Witness::new(), // Dogecoin doesn't use witness
+                }
+            })
+            .collect(),
         output: Vec::new(),
     };
 
     // Parse inscriptions from script_sig using Dogecoin parsing method
     let envelopes = ParsedEnvelope::from_transactions_dogecoin(&[bitcoin_tx]);
-    
+
     for envelope in envelopes.into_iter() {
         let input_index = envelope.input as usize;
         let inscription = envelope.payload;
-        
+
         let curse_type = if inscription.unrecognized_even_field {
             Some(OrdinalInscriptionCurseType::UnrecognizedEvenField)
         } else if inscription.duplicate_field {
@@ -240,20 +247,26 @@ pub fn parse_inscriptions_from_standardized_tx(
                 id.map(|i| i.to_string()).unwrap_or_default()
             })
             .collect();
-        
-        let delegate = inscription.delegate.as_ref().and_then(|bytes| {
-            InscriptionId::from_value(bytes).ok().map(|i| i.to_string())
-        });
-        
-        let metaprotocol = inscription.metaprotocol.as_ref().map(|bytes| {
-            String::from_utf8_lossy(bytes).to_string()
-        });
-        
+
+        let delegate = inscription
+            .delegate
+            .as_ref()
+            .and_then(|bytes| InscriptionId::from_value(bytes).ok().map(|i| i.to_string()));
+
+        let metaprotocol = inscription
+            .metaprotocol
+            .as_ref()
+            .map(|bytes| String::from_utf8_lossy(bytes).to_string());
+
         let metadata = inscription.metadata.as_ref().and_then(|bytes| {
-            ciborium::de::from_reader::<ciborium::Value, _>(bytes.as_slice()).ok().map(|v| json!(v))
+            ciborium::de::from_reader::<ciborium::Value, _>(bytes.as_slice())
+                .ok()
+                .map(|v| json!(v))
         });
 
-        let content_type = inscription.content_type.as_ref()
+        let content_type = inscription
+            .content_type
+            .as_ref()
             .map(|bytes| String::from_utf8_lossy(bytes).to_string())
             .unwrap_or_default();
 
@@ -291,7 +304,7 @@ pub fn parse_inscriptions_from_standardized_tx(
             dogespells: 0,
             unbound_sequence: None,
         };
-        
+
         // Check for DRC-20 operations
         if let Some(drc20) = config.ordinals_drc20_config() {
             if drc20.enabled && block_identifier.index >= drc20_activation_height(network) {
@@ -312,7 +325,9 @@ pub fn parse_inscriptions_from_standardized_tx(
         if config.dns_enabled() {
             if let Some(body) = inscription.body.as_ref() {
                 if let Some(name) = try_parse_dns_name(body) {
-                    dns_map.entry(name).or_insert_with(|| reveal_data.inscription_id.clone());
+                    dns_map
+                        .entry(name)
+                        .or_insert_with(|| reveal_data.inscription_id.clone());
                 }
             }
         }
@@ -321,7 +336,9 @@ pub fn parse_inscriptions_from_standardized_tx(
         if config.dogemap_enabled() {
             if let Some(body) = inscription.body.as_ref() {
                 if let Some(block_number) = try_parse_dogemap_claim(body, block_identifier.index) {
-                    dogemap_map.entry(block_number).or_insert_with(|| reveal_data.inscription_id.clone());
+                    dogemap_map
+                        .entry(block_number)
+                        .or_insert_with(|| reveal_data.inscription_id.clone());
                 }
             }
         }
@@ -365,15 +382,10 @@ pub fn parse_inscriptions_from_standardized_tx(
         // DMP detection — parse before predicate filter so market activity is never dropped.
         if config.dmp_enabled() {
             if let Some(body) = inscription.body.as_ref() {
-                if let Some(op) =
-                    try_parse_dmp(body, &reveal_data.inscription_id)
-                {
+                if let Some(op) = try_parse_dmp(body, &reveal_data.inscription_id) {
                     dmp_ops.push(ParsedDmpOp {
                         inscription_id: reveal_data.inscription_id.clone(),
-                        tx_id: tx
-                            .transaction_identifier
-                            .get_hash_bytes_str()
-                            .to_string(),
+                        tx_id: tx.transaction_identifier.get_hash_bytes_str().to_string(),
                         op,
                         block_height: block_identifier.index,
                         block_timestamp: 0, // filled in by the block-level caller
@@ -384,8 +396,15 @@ pub fn parse_inscriptions_from_standardized_tx(
 
         // Hiro-style predicate filtering: skip inscriptions that don't match the configured rules.
         if let Some(predicates) = config.doginals_predicates() {
-            if !crate::core::protocol::predicate::inscription_matches_predicates(&inscription, predicates) {
-                try_debug!(ctx, "Inscription {} filtered by predicate", reveal_data.inscription_id);
+            if !crate::core::protocol::predicate::inscription_matches_predicates(
+                &inscription,
+                predicates,
+            ) {
+                try_debug!(
+                    ctx,
+                    "Inscription {} filtered by predicate",
+                    reveal_data.inscription_id
+                );
                 continue;
             }
         }
@@ -441,8 +460,8 @@ pub fn parse_inscriptions_in_standardized_block(
 mod test {
     use std::collections::HashMap;
 
-    use dogecoin::{types::OrdinalOperation, utils::Context};
     use config::Config;
+    use dogecoin::{types::OrdinalOperation, utils::Context};
 
     use super::parse_inscriptions_in_standardized_block;
     use crate::core::test_builders::{TestBlockBuilder, TestTransactionBuilder, TestTxInBuilder};

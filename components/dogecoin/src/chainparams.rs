@@ -68,8 +68,7 @@ mod tests {
             return PathBuf::from(path);
         }
 
-        PathBuf::from(
-            "C:/Users/<USER>/Desktop/chains/dogecoin/src/chainparams.cpp")
+        PathBuf::from("C:/Users/<USER>/Desktop/chains/dogecoin/src/chainparams.cpp")
     }
 
     #[test]

@@ -1,5 +1,5 @@
-pub mod dogecoin;
 mod cursor;
+pub mod dogecoin;
 mod ordinals;
 mod rosetta;
 

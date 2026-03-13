@@ -103,41 +103,40 @@ pub(crate) async fn start_file_block_download_pipeline(
         let ctx_w = ctx.clone();
 
         let handle = hiro_system_kit::thread_named(&format!("BlkReader[{thread_idx}]"))
-            .spawn(move || {
-                loop {
-                    if abort.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let height = match work_rx.recv() {
-                        Ok(None) | Err(_) => break,
-                        Ok(Some(h)) => h,
-                    };
+            .spawn(move || loop {
+                if abort.load(Ordering::SeqCst) {
+                    break;
+                }
+                let height = match work_rx.recv() {
+                    Ok(None) | Err(_) => break,
+                    Ok(Some(h)) => h,
+                };
 
-                    use crate::blk_reader::read_block_by_height;
-                    match read_block_by_height(&blocks_dir, &index, height as u32, &network) {
-                        Ok(Some(block)) => {
-                            let compacted = if do_compress {
-                                BlockBytesCursor::from_standardized_block(&block).ok()
-                            } else {
-                                None
-                            };
-                            let block_opt = if height >= seq_start { Some(block) } else { None };
-                            let _ = result_tx.send((height, block_opt, compacted));
-                        }
-                        Ok(None) => {
-                            try_info!(
-                                ctx_w,
-                                "BlkReader[{thread_idx}]: #{height} not in .blk index"
-                            );
-                            let _ = result_tx.send((height, None, None));
-                        }
-                        Err(e) => {
-                            try_info!(
-                                ctx_w,
-                                "BlkReader[{thread_idx}]: error at #{height}: {e}"
-                            );
-                            let _ = result_tx.send((height, None, None));
-                        }
+                use crate::blk_reader::read_block_by_height;
+                match read_block_by_height(&blocks_dir, &index, height as u32, &network) {
+                    Ok(Some(block)) => {
+                        let compacted = if do_compress {
+                            BlockBytesCursor::from_standardized_block(&block).ok()
+                        } else {
+                            None
+                        };
+                        let block_opt = if height >= seq_start {
+                            Some(block)
+                        } else {
+                            None
+                        };
+                        let _ = result_tx.send((height, block_opt, compacted));
+                    }
+                    Ok(None) => {
+                        try_info!(
+                            ctx_w,
+                            "BlkReader[{thread_idx}]: #{height} not in .blk index"
+                        );
+                        let _ = result_tx.send((height, None, None));
+                    }
+                    Err(e) => {
+                        try_info!(ctx_w, "BlkReader[{thread_idx}]: error at #{height}: {e}");
+                        let _ = result_tx.send((height, None, None));
                     }
                 }
             })
@@ -213,8 +212,12 @@ pub(crate) async fn start_file_block_download_pipeline(
                     while let Some((block_opt, compacted_opt)) = inbox.remove(&cursor) {
                         let mut c = vec![];
                         let mut b = vec![];
-                        if let Some(bytes) = compacted_opt { c.push((cursor, bytes)); }
-                        if let Some(block) = block_opt { b.push(block); }
+                        if let Some(bytes) = compacted_opt {
+                            c.push((cursor, bytes));
+                        }
+                        if let Some(block) = block_opt {
+                            b.push(block);
+                        }
                         forwarded += 1;
                         cursor += 1;
                         if !c.is_empty() || !b.is_empty() {
@@ -247,7 +250,11 @@ pub(crate) async fn start_file_block_download_pipeline(
     let _ = dispatcher.join();
 
     let elapsed = t0.elapsed();
-    let bps = if elapsed.as_secs() > 0 { total / elapsed.as_secs() } else { total };
+    let bps = if elapsed.as_secs() > 0 {
+        total / elapsed.as_secs()
+    } else {
+        total
+    };
     try_info!(
         ctx,
         "BlkPipeline: streamed {} blocks in {:.1}s ({} blocks/s via direct .blk reads)",

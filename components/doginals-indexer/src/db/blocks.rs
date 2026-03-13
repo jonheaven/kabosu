@@ -1,7 +1,7 @@
 use std::{path::PathBuf, thread::sleep, time::Duration};
 
-use dogecoin::{try_error, try_warn, utils::Context};
 use config::Config;
+use dogecoin::{try_error, try_warn, utils::Context};
 use rand::{rng, Rng};
 use rocksdb::{DBPinnableSlice, Options, DB};
 
@@ -79,8 +79,10 @@ pub fn open_readonly_blocks_db(config: &Config, _ctx: &Context) -> Result<DB, St
         Err(e) => {
             // On first run, the DB may not exist yet. Create it with RW open.
             if e.to_string().contains("No such file or directory") {
-                let rw_opts =
-                    rocks_db_default_options(config.resources.ulimit, config.resources.memory_available);
+                let rw_opts = rocks_db_default_options(
+                    config.resources.ulimit,
+                    config.resources.memory_available,
+                );
                 DB::open(&rw_opts, &path)
                     .map_err(|e| format!("unable to initialize hord.rocksdb: {}", e))?
             } else {

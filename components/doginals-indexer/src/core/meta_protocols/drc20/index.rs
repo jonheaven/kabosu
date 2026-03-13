@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 
+use deadpool_postgres::Transaction;
 use dogecoin::{
     try_debug, try_info,
     types::{
-        DogecoinBlockData, BlockIdentifier, Drc20BalanceData, Drc20Operation, Drc20TokenDeployData,
+        BlockIdentifier, DogecoinBlockData, Drc20BalanceData, Drc20Operation, Drc20TokenDeployData,
         Drc20TransferData, OrdinalInscriptionTransferData, OrdinalOperation, TransactionIdentifier,
     },
     utils::Context,
 };
-use deadpool_postgres::Transaction;
 
 use super::{
-    drc20_activation_height,
     cache::Brc20MemoryCache,
+    drc20_activation_height,
     parser::ParsedDrc20Operation,
     verifier::{verify_drc20_operation, verify_drc20_transfers, VerifiedDrc20Operation},
 };
@@ -308,8 +308,8 @@ mod test {
     use crate::{
         core::{
             meta_protocols::drc20::{
-                drc20_pg,
                 cache::Brc20MemoryCache,
+                drc20_pg,
                 index::index_block_and_insert_drc20_operations,
                 parser::{
                     ParsedDrc20BalanceData, ParsedDrc20Operation, ParsedDrc20TokenDeployData,

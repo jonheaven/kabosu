@@ -1400,7 +1400,6 @@ struct StoredTicketRow {
     inscription_id: String,
     ticket_id: String,
     seed_numbers: Vec<u16>,
-    luck_marks: Option<Vec<u16>>,
     minted_height: u64,
     tip_percent: u8,
     fingerprint: Option<String>,
@@ -2063,7 +2062,7 @@ async fn get_lotto_tickets_for_resolution<T: GenericClient>(
 ) -> Result<Vec<StoredTicketRow>, String> {
     let rows = client
         .query(
-            "SELECT inscription_id, ticket_id, seed_numbers, luck_marks, minted_height, tip_percent,
+            "SELECT inscription_id, ticket_id, seed_numbers, minted_height, tip_percent,
                     fingerprint, classic_numbers
              FROM dogelotto_tickets
              WHERE lotto_id = $1 AND minted_height <= $2
@@ -2081,10 +2080,6 @@ async fn get_lotto_tickets_for_resolution<T: GenericClient>(
                 inscription_id: row.get("inscription_id"),
                 ticket_id: row.get("ticket_id"),
                 seed_numbers: i32_seed_numbers_to_u16(seed_numbers)?,
-                luck_marks: row
-                    .get::<_, Option<Vec<i32>>>("luck_marks")
-                    .map(i32_seed_numbers_to_u16)
-                    .transpose()?,
                 minted_height: row.get::<_, i64>("minted_height") as u64,
                 tip_percent: row.get::<_, i32>("tip_percent") as u8,
                 fingerprint: row.get("fingerprint"),
@@ -3283,7 +3278,10 @@ async fn rebuild_dogespells_balances_for_ticker<T: GenericClient>(
     client: &T,
 ) -> Result<(), String> {
     client
-        .execute("DELETE FROM dogespells_balances WHERE ticker = $1", &[&ticker])
+        .execute(
+            "DELETE FROM dogespells_balances WHERE ticker = $1",
+            &[&ticker],
+        )
         .await
         .map_err(|e| format!("rebuild_dogespells_balances_for_ticker (delete): {e}"))?;
 
@@ -3323,9 +3321,15 @@ async fn rebuild_dogespells_balances_for_ticker<T: GenericClient>(
     Ok(())
 }
 
-async fn rebuild_dogespells_nft<T: GenericClient>(identity: &str, client: &T) -> Result<(), String> {
+async fn rebuild_dogespells_nft<T: GenericClient>(
+    identity: &str,
+    client: &T,
+) -> Result<(), String> {
     client
-        .execute("DELETE FROM dogespells_nfts WHERE identity = $1", &[&identity])
+        .execute(
+            "DELETE FROM dogespells_nfts WHERE identity = $1",
+            &[&identity],
+        )
         .await
         .map_err(|e| format!("rebuild_dogespells_nft (delete): {e}"))?;
 
@@ -3372,10 +3376,7 @@ async fn rebuild_dogespells_nft<T: GenericClient>(identity: &str, client: &T) ->
 // DMP
 // ---------------------------------------------------------------------------
 
-use crate::core::{
-    meta_protocols::dmp::DmpOperation,
-    protocol::inscription_parsing::ParsedDmpOp,
-};
+use crate::core::{meta_protocols::dmp::DmpOperation, protocol::inscription_parsing::ParsedDmpOp};
 
 /// Insert all DMP operations from a block into the appropriate tables.
 pub async fn insert_dmp_ops<T: GenericClient>(

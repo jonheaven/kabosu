@@ -1,6 +1,6 @@
 use bitcoin::Network;
-use dogecoin::types::OrdinalInscriptionNumber;
 use deadpool_postgres::GenericClient;
+use dogecoin::types::OrdinalInscriptionNumber;
 
 use super::inscription_sequencing;
 use crate::db::doginals_pg;

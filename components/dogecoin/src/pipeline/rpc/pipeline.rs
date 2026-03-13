@@ -21,7 +21,7 @@ use crate::{
         wait_for_thread_finish, BlockProcessor, BlockProcessorCommand,
     },
     try_debug, try_info,
-    types::{DogecoinNetwork, BlockBytesCursor},
+    types::{BlockBytesCursor, DogecoinNetwork},
     utils::Context,
 };
 

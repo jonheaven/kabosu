@@ -27,8 +27,7 @@ impl InscriptionId {
             index_slice = &index_slice[0..index_slice.len() - 1];
         }
 
-        self
-            .txid
+        self.txid
             .to_byte_array()
             .iter()
             .chain(index_slice)
@@ -49,7 +48,8 @@ impl InscriptionId {
         } else {
             let mut index_bytes = [0u8; 4];
             let index_slice = &value[32..];
-            index_bytes[..index_slice.len().min(4)].copy_from_slice(&index_slice[..index_slice.len().min(4)]);
+            index_bytes[..index_slice.len().min(4)]
+                .copy_from_slice(&index_slice[..index_slice.len().min(4)]);
             u32::from_le_bytes(index_bytes)
         };
 

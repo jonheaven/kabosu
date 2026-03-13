@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 
+use deadpool_postgres::Transaction;
 use dogecoin::{
     types::{
-        DogecoinNetwork, BlockIdentifier, OrdinalInscriptionRevealData,
+        BlockIdentifier, DogecoinNetwork, OrdinalInscriptionRevealData,
         OrdinalInscriptionTransferData, OrdinalInscriptionTransferDestination,
         TransactionIdentifier,
     },
     utils::Context,
 };
-use deadpool_postgres::Transaction;
 
 use super::{
-    drc20_self_mint_activation_height,
     cache::Brc20MemoryCache,
-    decimals_str_amount_to_u128,
+    decimals_str_amount_to_u128, drc20_self_mint_activation_height,
     parser::{amt_has_valid_decimals, ParsedDrc20Operation},
 };
 use crate::try_debug;
@@ -302,7 +301,7 @@ pub async fn verify_drc20_transfers(
 #[cfg(test)]
 mod test {
     use dogecoin::types::{
-        DogecoinNetwork, BlockIdentifier, OrdinalInscriptionRevealData,
+        BlockIdentifier, DogecoinNetwork, OrdinalInscriptionRevealData,
         OrdinalInscriptionTransferData, OrdinalInscriptionTransferDestination,
         TransactionIdentifier,
     };
@@ -312,8 +311,8 @@ mod test {
     use super::{verify_drc20_operation, verify_drc20_transfers, VerifiedDrc20TransferData};
     use crate::{
         core::meta_protocols::drc20::{
-            drc20_pg,
             cache::Brc20MemoryCache,
+            drc20_pg,
             parser::{ParsedDrc20BalanceData, ParsedDrc20Operation, ParsedDrc20TokenDeployData},
             test_utils::{get_test_ctx, Brc20RevealBuilder, Drc20TransferBuilder},
             verifier::{

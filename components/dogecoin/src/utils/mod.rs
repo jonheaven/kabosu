@@ -12,7 +12,7 @@ use reqwest::RequestBuilder;
 
 use crate::{
     try_crit,
-    types::{DogecoinBlockData, BlockHeader, BlockIdentifier},
+    types::{BlockHeader, BlockIdentifier, DogecoinBlockData},
 };
 
 #[derive(Clone)]
@@ -359,42 +359,42 @@ pub fn write_file_content_at_path(file_path: &Path, content: &[u8]) -> Result<()
 // TODO: Fold these macros into one generic macro with configurable log levels.
 #[macro_export]
 macro_rules! try_info {
-    ($a:expr, $tag:expr, $($args:tt)*) => {
-        $a.try_log(|l| hiro_system_kit::slog::info!(l, $tag, $($args)*));
-    };
-    ($a:expr, $tag:expr) => {
-        $a.try_log(|l| hiro_system_kit::slog::info!(l, $tag));
-    };
+    ($a:expr, $tag:expr, $($args:tt)*) => {{
+        $a.try_log(|l| hiro_system_kit::slog::info!(l, $tag, $($args)*))
+    }};
+    ($a:expr, $tag:expr) => {{
+        $a.try_log(|l| hiro_system_kit::slog::info!(l, $tag))
+    }};
 }
 
 #[macro_export]
 macro_rules! try_debug {
-    ($a:expr, $tag:expr, $($args:tt)*) => {
-        $a.try_log(|l| hiro_system_kit::slog::debug!(l, $tag, $($args)*));
-    };
-    ($a:expr, $tag:expr) => {
-        $a.try_log(|l| hiro_system_kit::slog::debug!(l, $tag));
-    };
+    ($a:expr, $tag:expr, $($args:tt)*) => {{
+        $a.try_log(|l| hiro_system_kit::slog::debug!(l, $tag, $($args)*))
+    }};
+    ($a:expr, $tag:expr) => {{
+        $a.try_log(|l| hiro_system_kit::slog::debug!(l, $tag))
+    }};
 }
 
 #[macro_export]
 macro_rules! try_warn {
-    ($a:expr, $tag:expr, $($args:tt)*) => {
-        $a.try_log(|l| hiro_system_kit::slog::warn!(l, $tag, $($args)*));
-    };
-    ($a:expr, $tag:expr) => {
-        $a.try_log(|l| hiro_system_kit::slog::warn!(l, $tag));
-    };
+    ($a:expr, $tag:expr, $($args:tt)*) => {{
+        $a.try_log(|l| hiro_system_kit::slog::warn!(l, $tag, $($args)*))
+    }};
+    ($a:expr, $tag:expr) => {{
+        $a.try_log(|l| hiro_system_kit::slog::warn!(l, $tag))
+    }};
 }
 
 #[macro_export]
 macro_rules! try_error {
-    ($a:expr, $tag:expr, $($args:tt)*) => {
-        $a.try_log(|l| hiro_system_kit::slog::error!(l, $tag, $($args)*));
-    };
-    ($a:expr, $tag:expr) => {
-        $a.try_log(|l| hiro_system_kit::slog::error!(l, $tag));
-    };
+    ($a:expr, $tag:expr, $($args:tt)*) => {{
+        $a.try_log(|l| hiro_system_kit::slog::error!(l, $tag, $($args)*))
+    }};
+    ($a:expr, $tag:expr) => {{
+        $a.try_log(|l| hiro_system_kit::slog::error!(l, $tag))
+    }};
 }
 
 #[macro_export]

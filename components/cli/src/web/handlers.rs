@@ -10,9 +10,8 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{
-        Redirect,
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Response,
+        Html, IntoResponse, Redirect, Response,
     },
     Json,
 };
@@ -34,8 +33,7 @@ use doginals::envelope::ParsedEnvelope;
 
 use super::{AppState, MonitorBlockSample, MonitorEvent};
 
-const KOINU_RELIC_TEMPLATE: &str =
-    include_str!("../../../../../koinu-relic/src/inscription.html");
+const KOINU_RELIC_TEMPLATE: &str = include_str!("../../../../../koinu-relic/src/inscription.html");
 
 #[derive(Deserialize)]
 pub struct PaginationParams {
@@ -241,8 +239,9 @@ fn build_monitor_summary(event_name: &str, payload: &Value) -> String {
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "unknown".to_string())
         ),
-        "dogetag.tagged" => value_string(payload, "message")
-            .unwrap_or_else(|| "New on-chain Dogetag".to_string()),
+        "dogetag.tagged" => {
+            value_string(payload, "message").unwrap_or_else(|| "New on-chain Dogetag".to_string())
+        }
         "dogelotto.ticket_minted" => format!(
             "Ticket {} minted for {}",
             value_string(payload, "ticket_id").unwrap_or_else(|| "unknown".to_string()),
@@ -253,7 +252,10 @@ fn build_monitor_summary(event_name: &str, payload: &Value) -> String {
             value_string(payload, "ticket_id").unwrap_or_else(|| "unknown".to_string()),
             value_string(payload, "lotto_id").unwrap_or_else(|| "DogeLotto".to_string())
         ),
-        "dogespells.mint" | "dogespells.transfer" | "dogespells.burn" | "dogespells.beam_out"
+        "dogespells.mint"
+        | "dogespells.transfer"
+        | "dogespells.burn"
+        | "dogespells.beam_out"
         | "dogespells.beam_in" => format!(
             "{} {} {}",
             value_string(payload, "ticker").unwrap_or_else(|| "spell".to_string()),
@@ -288,7 +290,11 @@ fn build_monitor_summary(event_name: &str, payload: &Value) -> String {
     }
 }
 
-fn monitor_link(event_name: &str, txid: Option<&str>, inscription_id: Option<&str>) -> Option<String> {
+fn monitor_link(
+    event_name: &str,
+    txid: Option<&str>,
+    inscription_id: Option<&str>,
+) -> Option<String> {
     if let Some(inscription_id) = inscription_id {
         if !inscription_id.is_empty() {
             return Some(format!("/content/{}", inscription_id));
@@ -321,7 +327,12 @@ fn normalize_monitor_event(payload: &Value) -> MonitorEvent {
     let inscription_id = value_string(payload, "inscription_id");
     let block_height = value_u64(
         payload,
-        &["block_height", "claim_height", "minted_height", "resolved_height"],
+        &[
+            "block_height",
+            "claim_height",
+            "minted_height",
+            "resolved_height",
+        ],
     );
     let timestamp = unix_timestamp_millis();
     let link = monitor_link(&event_name, txid.as_deref(), inscription_id.as_deref());
@@ -352,14 +363,15 @@ fn record_monitor_event(state: &AppState, monitor_event: MonitorEvent) {
         .fetch_add(1, Ordering::Relaxed);
 
     if monitor_event.protocol.contains("reorg") {
-        state
-            .monitor
-            .reorg_count
-            .fetch_add(1, Ordering::Relaxed);
+        state.monitor.reorg_count.fetch_add(1, Ordering::Relaxed);
     }
 
     if let Some(height) = monitor_event.block_height {
-        let mut samples = state.monitor.block_samples.lock().expect("monitor block samples lock");
+        let mut samples = state
+            .monitor
+            .block_samples
+            .lock()
+            .expect("monitor block samples lock");
         let should_push = samples
             .back()
             .map(|sample| sample.height != height)
@@ -375,7 +387,11 @@ fn record_monitor_event(state: &AppState, monitor_event: MonitorEvent) {
         }
     }
 
-    let mut events = state.monitor.recent_events.lock().expect("monitor events lock");
+    let mut events = state
+        .monitor
+        .recent_events
+        .lock()
+        .expect("monitor events lock");
     events.push_front(monitor_event);
     while events.len() > super::MONITOR_EVENT_CAPACITY {
         events.pop_back();
@@ -805,8 +821,14 @@ async fn fetch_node_telemetry(config: config::DogecoinConfig) -> NodeTelemetry {
             block_height,
             difficulty: blockchain_info.as_ref().map(|info| info.difficulty),
             network_hashps,
-            mempool_size: mempool_info.as_ref().map(|info| info.size).unwrap_or_default(),
-            mempool_bytes: mempool_info.as_ref().map(|info| info.bytes).unwrap_or_default(),
+            mempool_size: mempool_info
+                .as_ref()
+                .map(|info| info.size)
+                .unwrap_or_default(),
+            mempool_bytes: mempool_info
+                .as_ref()
+                .map(|info| info.bytes)
+                .unwrap_or_default(),
             blockchain_size: blockchain_info.as_ref().map(|info| info.size_on_disk),
             verification_progress: blockchain_info
                 .as_ref()
@@ -915,10 +937,13 @@ pub async fn get_status(
     let total_dogetags = summary_row.get::<_, i64>("total_dogetags");
     let total_dmp = summary_row.get::<_, i64>("total_dmp");
     let total_dogelotto = summary_row.get::<_, i64>("total_dogelotto");
-    let total_indexed =
-        total_inscriptions + total_dogespells + total_dns + total_dogemap + total_dogetags
-            + total_dmp
-            + total_dogelotto;
+    let total_indexed = total_inscriptions
+        + total_dogespells
+        + total_dns
+        + total_dogemap
+        + total_dogetags
+        + total_dmp
+        + total_dogelotto;
     let node = fetch_node_telemetry(state.dogecoin_config.clone()).await;
     let chain_tip = node.block_height;
     let sync_progress = chain_tip.map(|tip| {
@@ -1056,8 +1081,10 @@ pub async fn get_monitor(
         .unwrap_or_default();
     let buffered_events = feed.len();
 
-    let buffer_memory_bytes =
-        serde_json::to_string(&feed).unwrap_or_default().as_bytes().len() as u64;
+    let buffer_memory_bytes = serde_json::to_string(&feed)
+        .unwrap_or_default()
+        .as_bytes()
+        .len() as u64;
     let blocks_per_second = {
         let samples: Vec<MonitorBlockSample> = state
             .monitor

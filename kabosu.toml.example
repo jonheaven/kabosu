@@ -47,8 +47,13 @@ password = "postgres"
 network = "mainnet"
 rpc_url = "http://127.0.0.1:22555"
 zmq_url = "tcp://127.0.0.1:28332"
-dogecoin_data_dir = "${USERPROFILE}/DogecoinData"
-blk_index_copy_dir = "${USERPROFILE}/Desktop/blk-index"
+# Set DOGECOIN_DATA_DIR in your shell or launch script when Core lives on a
+# non-default drive (for example F:\DogecoinData). When unset, kabosu will
+# auto-detect the platform default Dogecoin Core data directory.
+# dogecoin_data_dir = "F:\\DogecoinData"
+# Optional override for the shadow copy location. Leave unset to keep the copy
+# inside the active Dogecoin network data dir.
+# blk_index_copy_dir = "F:\\DogecoinData\\blk-index"
 
 [protocols.dns]
 enabled = true

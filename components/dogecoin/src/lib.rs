@@ -12,7 +12,6 @@ extern crate serde_json;
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -32,7 +31,7 @@ use crate::{
         rpc::{build_http_client, retrieve_block_hash_with_retry},
         wait_for_thread_finish, BlockProcessor, BlockProcessorCommand,
     },
-    types::{DogecoinBlockData, DogecoinNetwork, BlockIdentifier},
+    types::{BlockIdentifier, DogecoinBlockData, DogecoinNetwork},
     utils::{
         bitcoind::{dogecoin_get_chain_tip, dogecoin_wait_for_chain_tip},
         future_block_on, Context,
@@ -106,12 +105,11 @@ pub async fn start_dogecoin_indexer(
     // File:  Require .blk files; abort if index cannot be opened.
     // Rpc:   Skip .blk files entirely.
     // -----------------------------------------------------------------------
-    let index_copy_dir = config
-        .dogecoin
-        .blk_index_copy_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(&config.storage.working_dir).join("blk-index"));
+    let index_copy_dir = config.effective_blk_index_copy_dir().ok_or_else(|| {
+        "unable to determine Dogecoin blk-index copy dir; set DOGECOIN_DATA_DIR \
+         or dogecoin.dogecoin_data_dir in config"
+            .to_string()
+    })?;
 
     let blk_reader: Option<BlkReader> = match config.dogecoin.data_source {
         DogecoinDataSource::Rpc => {
@@ -119,10 +117,11 @@ pub async fn start_dogecoin_indexer(
             None
         }
         DogecoinDataSource::File => {
-            let data_dir = config.dogecoin.dogecoin_data_dir.as_deref().ok_or_else(|| {
-                "data_source = \"file\" requires dogecoin.dogecoin_data_dir to be set".to_string()
+            let blocks_dir = config.effective_dogecoin_blocks_dir().ok_or_else(|| {
+                "data_source = \"file\" requires a Dogecoin Core data dir. \
+                 Set DOGECOIN_DATA_DIR or dogecoin.dogecoin_data_dir."
+                    .to_string()
             })?;
-            let blocks_dir = PathBuf::from(data_dir).join("blocks");
             match BlkReader::open(&blocks_dir, &index_copy_dir, ctx) {
                 Some(r) => {
                     try_info!(
@@ -143,40 +142,35 @@ pub async fn start_dogecoin_indexer(
                 }
             }
         }
-        DogecoinDataSource::Auto => {
-            match config.dogecoin.dogecoin_data_dir.as_deref() {
+        DogecoinDataSource::Auto => match config.effective_dogecoin_blocks_dir() {
+            None => {
+                try_info!(
+                    ctx,
+                    "Data source: RPC (set DOGECOIN_DATA_DIR for 5-20× faster sync)"
+                );
+                None
+            }
+            Some(blocks_dir) => match BlkReader::open(&blocks_dir, &index_copy_dir, ctx) {
+                Some(r) => {
+                    try_info!(
+                        ctx,
+                        "Data source: FILE — using direct .blk reads (5-20× faster \
+                             initial sync). Max height in index: {}",
+                        r.max_height()
+                    );
+                    Some(r)
+                }
                 None => {
                     try_info!(
                         ctx,
-                        "Data source: RPC (set dogecoin.dogecoin_data_dir for 5-20× faster sync)"
+                        "Data source: RPC (falling back — .blk index unavailable). \
+                             Run `kabosu doginals index refresh-blk-index` to enable \
+                             fast mode on next start."
                     );
                     None
                 }
-                Some(data_dir) => {
-                    let blocks_dir = PathBuf::from(data_dir).join("blocks");
-                    match BlkReader::open(&blocks_dir, &index_copy_dir, ctx) {
-                        Some(r) => {
-                            try_info!(
-                                ctx,
-                                "Data source: FILE — using direct .blk reads (5-20× faster \
-                                 initial sync). Max height in index: {}",
-                                r.max_height()
-                            );
-                            Some(r)
-                        }
-                        None => {
-                            try_info!(
-                                ctx,
-                                "Data source: RPC (falling back — .blk index unavailable). \
-                                 Run `kabosu doginals index refresh-blk-index` to enable \
-                                 fast mode on next start."
-                            );
-                            None
-                        }
-                    }
-                }
-            }
-        }
+            },
+        },
     };
 
     if let Some(index_chain_tip) = indexer.chain_tip.as_mut() {
@@ -329,7 +323,10 @@ pub async fn start_dogecoin_indexer(
     // -----------------------------------------------------------------------
     let skip_rpc = config.stop_block.is_some();
     if skip_rpc {
-        try_info!(ctx, "Phase 2 (RPC): skipped (stop_block reached in Phase 1)");
+        try_info!(
+            ctx,
+            "Phase 2 (RPC): skipped (stop_block reached in Phase 1)"
+        );
     } else {
         try_info!(ctx, "Phase 2 (RPC): syncing remaining blocks to chain tip");
     }
@@ -401,4 +398,3 @@ pub async fn start_dogecoin_indexer(
 
     Ok(())
 }
-

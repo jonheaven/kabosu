@@ -1,9 +1,9 @@
 pub mod blocks;
-pub mod models;
 pub mod doginals_pg;
+pub mod models;
 
-use dogecoin::{try_info, try_warn, utils::Context};
 use config::Config;
+use dogecoin::{try_info, try_warn, utils::Context};
 use postgres::pg_connect_with_retry;
 
 use crate::core::meta_protocols::drc20::drc20_pg;

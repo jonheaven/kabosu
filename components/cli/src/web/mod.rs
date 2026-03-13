@@ -138,7 +138,10 @@ pub async fn start_web_server(
         .route("/dunes", get(dunes_page))
         .route("/lotto", get(lotto_page))
         .route("/koinu-relics", get(koinu_relics_page))
-        .route("/static/koinu-relic-auto-theme.html", get(koinu_relic_template))
+        .route(
+            "/static/koinu-relic-auto-theme.html",
+            get(koinu_relic_template),
+        )
         // Static assets
         .route("/wallet.js", get(wallet_js))
         // SSE event stream + webhook receiver
@@ -233,9 +236,8 @@ async fn health_check() -> impl IntoResponse {
 
 async fn additive_live_headers(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_owned();
-    let is_live_api = path.starts_with("/api/")
-        || path.starts_with("/v1/")
-        || path.starts_with("/dogespells/");
+    let is_live_api =
+        path.starts_with("/api/") || path.starts_with("/v1/") || path.starts_with("/dogespells/");
     let mut response = next.run(request).await;
 
     if is_live_api {
@@ -245,10 +247,9 @@ async fn additive_live_headers(request: Request, next: Next) -> Response {
                 .parse()
                 .expect("valid cache-control"),
         );
-        response.headers_mut().insert(
-            "Pragma",
-            "no-cache".parse().expect("valid pragma"),
-        );
+        response
+            .headers_mut()
+            .insert("Pragma", "no-cache".parse().expect("valid pragma"));
         response.headers_mut().insert(
             "X-Additive-Viewing",
             "immediate".parse().expect("valid additive-viewing header"),

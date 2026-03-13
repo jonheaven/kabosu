@@ -1,7 +1,7 @@
 pub mod helpers;
 use crate::{
     block_pool::BlockPool,
-    types::{DogecoinBlockData, BlockchainEvent},
+    types::{BlockchainEvent, DogecoinBlockData},
     utils::{AbstractBlock, Context},
 };
 

@@ -1,7 +1,7 @@
 use dogecoin::types::{
     bitcoin::{OutPoint, TxIn, TxOut},
-    DogecoinBlockData, DogecoinBlockMetadata, DogecoinNetwork, DogecoinTransactionData,
-    BitcoinTransactionMetadata, BlockIdentifier, Drc20Operation, OrdinalInscriptionNumber,
+    BitcoinTransactionMetadata, BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata,
+    DogecoinNetwork, DogecoinTransactionData, Drc20Operation, OrdinalInscriptionNumber,
     OrdinalInscriptionRevealData, OrdinalOperation, TransactionIdentifier,
 };
 

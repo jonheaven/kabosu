@@ -3,12 +3,12 @@ use std::{
     num::NonZeroUsize,
 };
 
+use config::Config;
+use deadpool_postgres::GenericClient;
 use dogecoin::types::{
     BlockIdentifier, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
     TransactionIdentifier,
 };
-use config::Config;
-use deadpool_postgres::GenericClient;
 use lru::LruCache;
 use maplit::hashmap;
 use postgres::types::{PgBigIntU32, PgNumericU128, PgNumericU64, PgSmallIntU8};
@@ -168,11 +168,8 @@ impl Brc20MemoryCache {
             self.handle_cache_miss(client).await?;
             let missed_ordinal_numbers: Vec<u64> =
                 cache_missed_ordinal_numbers.iter().cloned().collect();
-            let pending_transfers = drc20_pg::get_unsent_token_transfers(
-                &missed_ordinal_numbers,
-                client,
-            )
-            .await?;
+            let pending_transfers =
+                drc20_pg::get_unsent_token_transfers(&missed_ordinal_numbers, client).await?;
             for unsent_transfer in pending_transfers.into_iter() {
                 cache_missed_ordinal_numbers.remove(&unsent_transfer.ordinal_number.0);
                 self.unsent_transfers
@@ -491,7 +488,7 @@ impl Brc20MemoryCache {
 
 #[cfg(test)]
 mod test {
-    use dogecoin::types::{DogecoinNetwork, BlockIdentifier, TransactionIdentifier};
+    use dogecoin::types::{BlockIdentifier, DogecoinNetwork, TransactionIdentifier};
     use postgres::{pg_begin, pg_pool_client};
     use test_case::test_case;
 

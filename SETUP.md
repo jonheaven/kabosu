@@ -14,9 +14,14 @@ cd kabosu
 - Edit `kabosu.toml` as needed. By default, user paths use the `%USERPROFILE%` environment variable for Windows (or `$HOME` for Unix).
 - Set your Dogecoin Core RPC credentials as environment variables:
   ```powershell
+  $env:DOGECOIN_DATA_DIR="F:\DogecoinData"   # optional if Core uses the default data dir
   $env:DOGE_RPC_USERNAME="youruser"
   $env:DOGE_RPC_PASSWORD="yourpass"
   ```
+
+- If `DOGECOIN_DATA_DIR` is unset, kabosu auto-detects the platform default
+  Dogecoin Core data directory. Its shared blk-index shadow copy now defaults
+  to `<dogecoin-data-dir>/<network>/blk-index`.
 
 ## 3. Build the Project
 ```powershell

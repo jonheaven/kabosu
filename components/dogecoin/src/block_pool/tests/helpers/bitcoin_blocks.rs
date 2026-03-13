@@ -1,5 +1,5 @@
 use crate::types::{
-    DogecoinBlockData, DogecoinBlockMetadata, DogecoinTransactionData, BlockIdentifier,
+    BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata, DogecoinTransactionData,
 };
 
 pub fn generate_test_bitcoin_block(

@@ -200,9 +200,7 @@ fn parse_bid(raw: RawDmp, inscription_id: &str) -> Option<DmpOperation> {
 
 fn parse_settle(raw: RawDmp, inscription_id: &str) -> Option<DmpOperation> {
     let listing_id = normalize_inscription_id(raw.listing_id?)?;
-    let bid_id = raw
-        .bid_id
-        .and_then(|id| normalize_inscription_id(id));
+    let bid_id = raw.bid_id.and_then(|id| normalize_inscription_id(id));
     let settler = normalize_address(raw.seller?)?;
     let psbt_cid = normalize_cid(raw.psbt_cid?)?;
     let nonce = raw.nonce?;
@@ -243,7 +241,10 @@ fn normalize_address(addr: String) -> Option<String> {
     if addr.len() < 24 || addr.len() > 128 {
         return None;
     }
-    if addr.chars().any(|c| c.is_ascii_whitespace() || c.is_ascii_control()) {
+    if addr
+        .chars()
+        .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
+    {
         return None;
     }
     Some(addr.to_string())

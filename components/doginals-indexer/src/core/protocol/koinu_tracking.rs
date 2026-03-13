@@ -1,15 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use bitcoin::{Network, ScriptBuf};
+use deadpool_postgres::Transaction;
 use dogecoin::{
     try_debug, try_info,
     types::{
-        DogecoinBlockData, DogecoinTransactionData, BlockIdentifier, OrdinalInscriptionTransferData,
-        OrdinalInscriptionTransferDestination, OrdinalOperation,
+        BlockIdentifier, DogecoinBlockData, DogecoinTransactionData,
+        OrdinalInscriptionTransferData, OrdinalInscriptionTransferDestination, OrdinalOperation,
     },
     utils::Context,
 };
-use deadpool_postgres::Transaction;
 
 use super::inscription_sequencing::get_dogecoin_network;
 use crate::{
@@ -128,7 +128,9 @@ pub fn compute_koinupoint_post_transfer(
                 let script_pub_key_hex = tx.metadata.outputs[output_index].get_script_pubkey_hex();
                 let updated_address = match ScriptBuf::from_hex(script_pub_key_hex) {
                     Ok(script) => match dogecoin_address_from_script(&script) {
-                        Some(address) => OrdinalInscriptionTransferDestination::Transferred(address),
+                        Some(address) => {
+                            OrdinalInscriptionTransferDestination::Transferred(address)
+                        }
                         None => OrdinalInscriptionTransferDestination::Burnt(script.to_string()),
                     },
                     Err(e) => {

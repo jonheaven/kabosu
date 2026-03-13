@@ -6,13 +6,13 @@ use bitcoin::{
     transaction::{OutPoint, Sequence, TxIn, TxOut, Version},
     Amount, Network, ScriptBuf, Transaction, Txid,
 };
+use deadpool_postgres::Client;
 use dogecoin::{
     try_info,
     types::{DogecoinBlockData, DogecoinTransactionData},
     utils::Context,
 };
-use deadpool_postgres::Client;
-use doginals_parser::{Artifact, Flaw, Dunestone};
+use doginals_parser::{Artifact, Dunestone, Flaw};
 use postgres::pg_begin;
 
 use super::{cache::index_cache::IndexCache, pg_get_max_rune_number, pg_roll_back_block};
@@ -259,8 +259,8 @@ pub async fn roll_back_block(pg_client: &mut Client, block_height: u64, ctx: &Co
 mod tests {
     use dogecoin::types::{
         bitcoin::{OutPoint as RosettaOutPoint, TxIn as RosettaTxIn, TxOut as RosettaTxOut},
-        DogecoinBlockData, BitcoinBlockMetadata, BitcoinNetwork, DogecoinTransactionData,
-        BitcoinTransactionMetadata, BlockIdentifier, TransactionIdentifier,
+        BitcoinBlockMetadata, BitcoinNetwork, BitcoinTransactionMetadata, BlockIdentifier,
+        DogecoinBlockData, DogecoinTransactionData, TransactionIdentifier,
     };
     use doginals_parser::Artifact;
 

@@ -5,7 +5,7 @@ use std::{
 
 use bitcoin::ScriptBuf;
 use dogecoin::{try_debug, try_warn, utils::Context};
-use doginals_parser::{Cenotaph, Edict, Etching, Dune, DuneId};
+use doginals_parser::{Cenotaph, Dune, DuneId, Edict, Etching};
 
 use super::{
     input_rune_balance::InputRuneBalance, transaction_location::TransactionLocation,
@@ -410,8 +410,8 @@ mod test {
 
     use bitcoin::ScriptBuf;
     use dogecoin::utils::Context;
+    use doginals_parser::{Dune, Edict, Etching, Terms};
     use maplit::hashmap;
-    use doginals_parser::{Edict, Etching, Dune, Terms};
 
     use super::TransactionCache;
     use crate::db::{

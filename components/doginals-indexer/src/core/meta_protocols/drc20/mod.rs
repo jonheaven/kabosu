@@ -1,7 +1,7 @@
 use dogecoin::types::DogecoinNetwork;
 
-pub mod drc20_pg;
 pub mod cache;
+pub mod drc20_pg;
 pub mod index;
 pub mod models;
 pub mod parser;

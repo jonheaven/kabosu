@@ -2,7 +2,7 @@ use hiro_system_kit::slog;
 
 use super::{super::BlockchainEventExpectation, bitcoin_blocks};
 use crate::{
-    types::{DogecoinBlockData, BlockchainEvent},
+    types::{BlockchainEvent, DogecoinBlockData},
     utils::Context,
 };
 

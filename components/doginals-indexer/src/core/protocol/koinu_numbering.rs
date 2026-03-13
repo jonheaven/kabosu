@@ -1,5 +1,7 @@
 use std::{hash::BuildHasherDefault, sync::Arc};
 
+use config::Config;
+use dashmap::DashMap;
 use dogecoin::{
     bitcoincore_rpc::RpcApi,
     try_error, try_warn,
@@ -9,11 +11,9 @@ use dogecoin::{
     },
     utils::{bitcoind::dogecoin_get_client, Context},
 };
-use serde_json::json;
-use config::Config;
-use dashmap::DashMap;
-use fxhash::FxHasher;
 use doginals::{height::Height, koinu::Koinu};
+use fxhash::FxHasher;
+use serde_json::json;
 
 use crate::db::blocks::find_pinned_block_bytes_at_block_height;
 
@@ -170,7 +170,8 @@ pub fn compute_koinu_number(
                         "block #{ordinal_block_number} not in local DB while traversing {}; fetching tx from RPC",
                         transaction_identifier.hash
                     );
-                    let rpc_cursor = fetch_tx_cursor_from_rpc(ordinal_block_number, txid, config, ctx)?;
+                    let rpc_cursor =
+                        fetch_tx_cursor_from_rpc(ordinal_block_number, txid, config, ctx)?;
                     // Warm the cache so the next iteration takes the fast cached path.
                     traversals_cache.insert((ordinal_block_number, tx_cursor.0), rpc_cursor);
                     continue;
@@ -341,8 +342,8 @@ fn fetch_tx_cursor_from_rpc(
             Some(s) => s,
             None => continue,
         };
-        let txid_bytes = hex::decode(txid_str)
-            .map_err(|e| format!("bad txid hex '{txid_str}': {e}"))?;
+        let txid_bytes =
+            hex::decode(txid_str).map_err(|e| format!("bad txid hex '{txid_str}': {e}"))?;
         if txid_bytes.len() < 8 {
             continue;
         }
@@ -363,14 +364,15 @@ fn fetch_tx_cursor_from_rpc(
                 let input_txid_str = vin["txid"]
                     .as_str()
                     .ok_or_else(|| "missing vin txid".to_string())?;
-                let input_txid_bytes = hex::decode(input_txid_str)
-                    .map_err(|e| format!("bad input txid hex: {e}"))?;
+                let input_txid_bytes =
+                    hex::decode(input_txid_str).map_err(|e| format!("bad input txid hex: {e}"))?;
                 let txin: [u8; 8] = input_txid_bytes[..8]
                     .try_into()
                     .map_err(|_| "input txid too short".to_string())?;
                 let vout_idx = vin["vout"]
                     .as_u64()
-                    .ok_or_else(|| "missing vout".to_string())? as u16;
+                    .ok_or_else(|| "missing vout".to_string())?
+                    as u16;
 
                 // Prefer prevout from verbosity=3 response; fall back to separate RPC calls
                 let (txin_value, input_block_height) = if let Some(prevout) = vin.get("prevout") {
@@ -380,7 +382,8 @@ fn fetch_tx_cursor_from_rpc(
                         .ok_or_else(|| "missing prevout.value".to_string())?;
                     let height = prevout["height"]
                         .as_u64()
-                        .ok_or_else(|| "missing prevout.height".to_string())? as u32;
+                        .ok_or_else(|| "missing prevout.height".to_string())?
+                        as u32;
                     (value_sat, height)
                 } else {
                     // Dogecoin Core omitted prevout — fetch parent tx separately
@@ -399,7 +402,8 @@ fn fetch_tx_cursor_from_rpc(
                         .map_err(|e| format!("RPC getblockheader({blockhash_str}): {e}"))?;
                     let height = header["height"]
                         .as_u64()
-                        .ok_or_else(|| "missing header height".to_string())? as u32;
+                        .ok_or_else(|| "missing header height".to_string())?
+                        as u32;
                     (value_sat, height)
                 };
 
@@ -436,6 +440,8 @@ fn fetch_tx_cursor_from_rpc(
 mod test {
     use std::{hash::BuildHasherDefault, sync::Arc};
 
+    use config::Config;
+    use dashmap::DashMap;
     use dogecoin::{
         types::{
             bitcoin::TxOut, BlockIdentifier, TransactionBytesCursor, TransactionIdentifier,
@@ -443,8 +449,6 @@ mod test {
         },
         utils::Context,
     };
-    use config::Config;
-    use dashmap::DashMap;
     use fxhash::FxHasher;
 
     use super::compute_koinu_number;

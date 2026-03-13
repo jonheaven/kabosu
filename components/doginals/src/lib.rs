@@ -2,33 +2,32 @@
 #![allow(clippy::large_enum_variant)]
 
 use {
-  bitcoin::{
-    Network, OutPoint, ScriptBuf, Transaction,
-    consensus::{Decodable, Encodable},
-
-    opcodes,
-    script::{self, Instruction},
-  },
-  derive_more::{Display, FromStr},
-  serde::{Deserialize, Serialize},
-  serde_with::{DeserializeFromStr, SerializeDisplay},
-  std::{
-    sync::LazyLock,
-    cmp,
-    collections::{HashMap, VecDeque},
-    fmt::{self, Formatter},
-    num::ParseIntError,
-    ops::{Add, AddAssign, Sub},
-  },
-  thiserror::Error,
+    bitcoin::{
+        consensus::{Decodable, Encodable},
+        opcodes,
+        script::{self, Instruction},
+        Network, OutPoint, ScriptBuf, Transaction,
+    },
+    derive_more::{Display, FromStr},
+    serde::{Deserialize, Serialize},
+    serde_with::{DeserializeFromStr, SerializeDisplay},
+    std::{
+        cmp,
+        collections::{HashMap, VecDeque},
+        fmt::{self, Formatter},
+        num::ParseIntError,
+        ops::{Add, AddAssign, Sub},
+        sync::LazyLock,
+    },
+    thiserror::Error,
 };
 
 pub use {
-  artifact::Artifact, cenotaph::Cenotaph, dogespell::Dogespell, decimal_koinu::DecimalKoinu, degree::Degree,
-  edict::Edict, epoch::Epoch, etching::Etching, flaw::Flaw, height::Height, pile::Pile,
-  rarity::Rarity, dune::Dune, dune_id::DuneId, dunestone::Dunestone, koinu::Koinu, koinu_point::KoinuPoint,
-  spaced_dune::SpacedDune, terms::Terms,
-  envelope::Envelope, inscription::Inscription, inscription_id::InscriptionId, media::Media, tag::Tag,
+    artifact::Artifact, cenotaph::Cenotaph, decimal_koinu::DecimalKoinu, degree::Degree,
+    dogespell::Dogespell, dune::Dune, dune_id::DuneId, dunestone::Dunestone, edict::Edict,
+    envelope::Envelope, epoch::Epoch, etching::Etching, flaw::Flaw, height::Height,
+    inscription::Inscription, inscription_id::InscriptionId, koinu::Koinu, koinu_point::KoinuPoint,
+    media::Media, pile::Pile, rarity::Rarity, spaced_dune::SpacedDune, tag::Tag, terms::Terms,
 };
 
 pub const COIN_VALUE: u64 = 100_000_000;
@@ -53,14 +52,17 @@ pub const DOGECOIN_HALVING_INTERVAL: u32 = 100_000;
 pub const SUBSIDY_HALVING_INTERVAL: u32 = 1;
 
 fn default<T: Default>() -> T {
-  Default::default()
+    Default::default()
 }
 
 mod artifact;
 mod cenotaph;
-pub mod dogespell;
 mod decimal_koinu;
 mod degree;
+pub mod dogespell;
+mod dune;
+mod dune_id;
+mod dunestone;
 mod edict;
 pub mod envelope;
 mod epoch;
@@ -69,14 +71,11 @@ mod flaw;
 pub mod height;
 pub mod inscription;
 pub mod inscription_id;
+pub mod koinu;
+pub mod koinu_point;
 pub mod media;
 mod pile;
 pub mod rarity;
-mod dune;
-mod dune_id;
-mod dunestone;
-pub mod koinu;
-pub mod koinu_point;
 pub mod spaced_dune;
 pub mod tag;
 mod terms;

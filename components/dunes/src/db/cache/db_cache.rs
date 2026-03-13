@@ -8,7 +8,7 @@ use crate::db::{
         db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry, db_rune::DbDune,
         db_supply_change::DbSupplyChange,
     },
-    pg_insert_balance_changes, pg_insert_ledger_entries, pg_insert_dunes, pg_insert_supply_changes,
+    pg_insert_balance_changes, pg_insert_dunes, pg_insert_ledger_entries, pg_insert_supply_changes,
 };
 
 /// Holds rows that have yet to be inserted into the database.

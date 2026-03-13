@@ -71,7 +71,7 @@ dog scan ...                             # only when you need the wallet
 
 ## Migration Path (If You Want to Switch)
 
-1. Set `dogecoin_data_dir` in `kabosu.toml`
+1. Set `DOGECOIN_DATA_DIR` (or `dogecoin_data_dir` in `kabosu.toml`)
 2. Run `kabosu doginals index refresh-blk-index`
 3. Run `kabosu doginals index` once — it catches up using the same fast `.blk` tech
 

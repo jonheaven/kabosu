@@ -6,18 +6,18 @@ use std::{
     thread::JoinHandle,
 };
 
-use dogecoin::{
-    start_dogecoin_indexer, try_error, try_info, try_warn,
-    types::BlockIdentifier,
-    utils::{future_block_on, Context},
-    Indexer, IndexerCommand,
-};
 use config::Config;
 use db::{
     cache::index_cache::IndexCache,
     index::{get_rune_genesis_block_height, index_block, roll_back_block},
 };
 use deadpool_postgres::Pool;
+use dogecoin::{
+    start_dogecoin_indexer, try_error, try_info, try_warn,
+    types::BlockIdentifier,
+    utils::{future_block_on, Context},
+    Indexer, IndexerCommand,
+};
 use postgres::{pg_pool, pg_pool_client};
 use utils::monitoring::{start_serving_prometheus_metrics, PrometheusMonitoring};
 

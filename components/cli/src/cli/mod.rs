@@ -62,25 +62,25 @@ fn run_refresh_blk_index(cmd: &RefreshBlkIndexCommand, ctx: &Context) -> Result<
     use dogecoin::blk_reader::refresh_index_copy;
 
     let config = Config::from_file_path(&cmd.config_path)?;
-    let data_dir = config.dogecoin.dogecoin_data_dir.ok_or_else(|| {
-        "dogecoin.dogecoin_data_dir is not set in the config file.\n\
-         Add dogecoin_data_dir = \"/path/to/.dogecoin\" under [dogecoin] to enable direct .blk reads."
-            .to_string()
-    })?;
-
-    let live_index = PathBuf::from(&data_dir).join("blocks").join("index");
+    let live_index = config
+        .effective_dogecoin_blocks_dir()
+        .ok_or_else(|| {
+            "Unable to determine Dogecoin Core blocks dir.\n\
+             Set DOGECOIN_DATA_DIR or dogecoin.dogecoin_data_dir to enable direct .blk reads."
+                .to_string()
+        })?
+        .join("index");
     if !live_index.exists() {
         eprintln!("Block index not found at {}", live_index.display());
         eprintln!("Is Dogecoin Core installed and has it completed the initial block download?");
         return Err(format!("block index not found at {}", live_index.display()));
     }
 
-    let copy_dir = config
-        .dogecoin
-        .blk_index_copy_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(&config.storage.working_dir).join("blk-index"));
+    let copy_dir = config.effective_blk_index_copy_dir().ok_or_else(|| {
+        "Unable to determine Dogecoin blk-index copy dir.\n\
+         Set DOGECOIN_DATA_DIR or dogecoin.dogecoin_data_dir, or override dogecoin.blk_index_copy_dir."
+            .to_string()
+    })?;
 
     println!("Refreshing block index copy...");
     println!("  Source: {}", live_index.display());
