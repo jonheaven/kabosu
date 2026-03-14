@@ -1,9 +1,9 @@
-[<img alt="Crates.io" src="https://img.shields.io/crates/v/doge-lotto">](https://crates.io/crates/doge-lotto)
-[<img alt="Docs" src="https://img.shields.io/docsrs/doge-lotto">](https://docs.rs/doge-lotto)
-[<img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg">](LICENSE)
-[<img alt="DogeLotto" src="https://img.shields.io/badge/DogeLotto-official_standard-blue">](https://github.com/jonheaven/doge-lotto)
-# kabosu — Dogecoin Doginals Indexer
 # kabosu — Dogecoin Indexer
+
+[![Crates.io](https://img.shields.io/crates/v/doge-lotto)](https://crates.io/crates/doge-lotto)
+[![Docs](https://img.shields.io/docsrs/doge-lotto)](https://docs.rs/doge-lotto)
+[![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![DogeLotto](https://img.shields.io/badge/DogeLotto-official_standard-blue)](https://github.com/jonheaven/doge-lotto)
 
 The fastest, lightest, most selective Doginals indexer for Dogecoin.
 Backward-traversal + reorg-safe (Chainhook engine) + Hiro-style predicate filtering + real-time webhooks.
@@ -20,13 +20,17 @@ Both projects are completely independent codebases. kabosu does not import dog.
 ## Supported Protocols
 
 | Protocol | Status | CLI commands |
-|---|---|---|
+| --- | --- | --- |  
 | Doginals (inscriptions) | Full — backward traversal, reorg-safe | `kabosu doginals service start` |
 | DRC-20 | Full | via `doginals` indexer |
 | Dunes | Full | `kabosu dunes service start` |
 | DNS (Dogecoin Name System) | Full — 28 namespaces, first-wins, reorg-safe | `kabosu dns resolve`, `kabosu dns list` |
 | Dogemap (block claims) | Full — first-wins, reorg-safe | `kabosu dogemap status`, `kabosu dogemap list` |
-| DogeLotto | Full — deploys, atomic ticket mints, auto-resolution, Burners mechanic<br>**Official standard:** [github.com/jonheaven/doge-lotto](https://github.com/jonheaven/doge-lotto) | `kabosu lotto deploy`, `kabosu lotto mint`, `kabosu lotto list`, `kabosu lotto status`, `kabosu lotto burn`, `kabosu lotto burners`, `kabosu doginals index sync --only dogelotto` |
+| DogeLotto | Full — deploys, atomic ticket mints, auto-resolution, Burners mechanic | `kabosu lotto deploy`, `kabosu lotto mint`, `kabosu lotto list`, `kabosu lotto status`, `kabosu lotto burn`, `kabosu lotto burners`, `kabosu doginals index sync --only dogelotto` |
+
+### Metaprotocols
+
+**Official standard:** [github.com/jonheaven/doge-lotto](https://github.com/jonheaven/doge-lotto)
 | Dogetag (on-chain graffiti) | Full — OP_RETURN text messages, reorg-safe | `kabosu dogetag list`, `kabosu dogetag search`, `kabosu dogetag address`, `kabosu dogetag send` |
 | DogeSpells | Full — OP_RETURN magic-prefix + CBOR spells, balances, NFT metadata snapshots, reorg-safe | `kabosu doginals index sync --only dogespells` plus `/dogespells/*` API routes |
 | DMP | Full — inscription-based marketplace: listings, bids, settlements, cancels; reorg-safe | `kabosu doginals index sync --only dmp`, `GET /api/dmp/listings` |
@@ -42,7 +46,6 @@ Both projects are completely independent codebases. kabosu does not import dog.
 - Inscribes the `DogeLotto` mint JSON (with `"p":"DogeLotto"`) in the same transaction.
 
 This lets the indexer verify payment and tip commitments trustlessly.
-
 
 #### Lucky Ðraw → Ðeno (Keno-style)
 
@@ -109,7 +112,9 @@ Users can transfer expired lottery tickets to the official burn address (`DBurnX
 - Only tickets from **resolved or expired lotteries** can be burned
 
 **Burn a ticket:**
+
 ```bash
+
 # Get ticket info and burn address
 kabosu lotto burn <ticket-inscription-id> --config-path kabosu.toml
 
@@ -117,7 +122,9 @@ kabosu lotto burn <ticket-inscription-id> --config-path kabosu.toml
 ```
 
 **Check Burn Points:**
+
 ```bash
+
 # View your own burn points
 kabosu lotto burners --address D1abc... --config-path kabosu.toml
 
@@ -131,34 +138,46 @@ kabosu lotto burners --config-path kabosu.toml --json
 #### Unclaimed Prizes — Supporting Protocol Development
 
 **The 30-Day Rule:**
+
 - Prizes that remain unclaimed for **30 days after the draw block** are permanently considered donations to the protocol developers.
+  
 - The `prize_pool_address` (set during lottery deployment) permanently holds all ticket payments and unclaimed prizes.
+  
 - Winners have 30 days to claim their prizes by transferring the winning ticket inscription to their desired address.
+
 - After 30 days, unclaimed funds remain in the prize pool address to support ongoing kabosu development and infrastructure.
 
 **For Protocol-Level DogeLotto Deployments (`doge-69-420` and `doge-max`):**
+
 - This is **explicit public policy** — all participants acknowledge that unclaimed prizes fund future development.
+  
 - The protocol developers maintain the prize pool wallets for these official lotteries.
+
 - Transparency: all prize pool addresses are publicly visible on-chain and in deploy inscriptions.
 
 **For Community/Mini Lotteries:**
+
 - Deployers set their own `prize_pool_address` and manage unclaimed funds according to their stated rules.
+  
 - The 30-day window is a recommended best practice but enforced at the social/community level.
 
 **Check Prize Status:**
+
 ```bash
+
 # View lottery status including unclaimed prizes
 kabosu lotto status <lotto-id> --config-path kabosu.toml
 ```
 
 The `lotto status` command shows:
+
 - Total prize pool and net prizes awarded
 - List of unclaimed wins with their age (days since draw)
 - Clear indication when prizes enter the unclaimed/development fund after 30 days
 
 ---
 
-## For all other protocols, see the full documentation and CLI help.
+## For all other protocols, see the full documentation and CLI help
 
 ---
 

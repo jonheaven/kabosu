@@ -115,7 +115,7 @@ fn cumulative_post_wonky_sats(height: u32) -> u64 {
 // Epoch type
 //
 // With SUBSIDY_HALVING_INTERVAL = 1, Epoch(n) corresponds to block n.
-// This lets the existing ordinals machinery work unmodified: every height
+// This lets the existing doginals machinery work unmodified: every height
 // is its own epoch, and `subsidy()` / `starting_sat()` delegate to the
 // Dogecoin subsidy functions above.
 // ---------------------------------------------------------------------------

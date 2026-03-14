@@ -6,7 +6,7 @@ use dogecoin::{
     try_debug, try_info,
     types::{
         BlockIdentifier, DogecoinBlockData, DogecoinTransactionData,
-        OrdinalInscriptionTransferData, OrdinalInscriptionTransferDestination, OrdinalOperation,
+        DoginalInscriptionTransferData, DoginalInscriptionTransferDestination, DoginalOperation,
     },
     utils::Context,
 };
@@ -43,7 +43,7 @@ fn dogecoin_address_from_script(script: &ScriptBuf) -> Option<String> {
 
 #[derive(Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub struct WatchedSatpoint {
-    pub ordinal_number: u64,
+    pub doginal_number: u64,
     pub offset: u64,
 }
 
@@ -77,7 +77,7 @@ pub async fn augment_block_with_transfers(
     let network = get_dogecoin_network(&block.metadata.network);
     let mut block_transferred_satpoints = HashMap::new();
     for (tx_index, tx) in block.transactions.iter_mut().enumerate() {
-        augment_transaction_with_ordinal_transfers(
+        augment_transaction_with_doginal_transfers(
             tx,
             tx_index,
             &mut block_transferred_satpoints,
@@ -100,7 +100,7 @@ pub fn compute_koinupoint_post_transfer(
     relative_pointer_value: u64,
     _network: &Network,
     ctx: &Context,
-) -> (OrdinalInscriptionTransferDestination, String, Option<u64>) {
+) -> (DoginalInscriptionTransferDestination, String, Option<u64>) {
     let inputs: Vec<u64> = tx
         .metadata
         .inputs
@@ -129,9 +129,9 @@ pub fn compute_koinupoint_post_transfer(
                 let updated_address = match ScriptBuf::from_hex(script_pub_key_hex) {
                     Ok(script) => match dogecoin_address_from_script(&script) {
                         Some(address) => {
-                            OrdinalInscriptionTransferDestination::Transferred(address)
+                            DoginalInscriptionTransferDestination::Transferred(address)
                         }
-                        None => OrdinalInscriptionTransferDestination::Burnt(script.to_string()),
+                        None => DoginalInscriptionTransferDestination::Burnt(script.to_string()),
                     },
                     Err(e) => {
                         try_info!(
@@ -139,7 +139,7 @@ pub fn compute_koinupoint_post_transfer(
                             "unable to retrieve address from {script_pub_key_hex}: {error}",
                             error = e.to_string()
                         );
-                        OrdinalInscriptionTransferDestination::Burnt(script_pub_key_hex.to_string())
+                        DoginalInscriptionTransferDestination::Burnt(script_pub_key_hex.to_string())
                     }
                 };
 
@@ -155,7 +155,7 @@ pub fn compute_koinupoint_post_transfer(
                 (
                     UNBOUND_INSCRIPTION_KOINUPOINT.into(),
                     0,
-                    OrdinalInscriptionTransferDestination::SpentInFees,
+                    DoginalInscriptionTransferDestination::SpentInFees,
                     None,
                 )
             }
@@ -170,7 +170,7 @@ pub fn compute_koinupoint_post_transfer(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn augment_transaction_with_ordinal_transfers(
+pub async fn augment_transaction_with_doginal_transfers(
     tx: &mut DogecoinTransactionData,
     tx_index: usize,
     block_transferred_satpoints: &mut HashMap<String, Vec<WatchedSatpoint>>,
@@ -182,11 +182,11 @@ pub async fn augment_transaction_with_ordinal_transfers(
     transfers_count: &mut usize,
 ) -> Result<(), String> {
     // The transfers are inserted in storage after the inscriptions.
-    // We have a unicity constraing, and can only have 1 ordinals per satpoint.
+    // We have a unicity constraing, and can only have 1 doginals per satpoint.
     let mut updated_sats = HashSet::new();
-    for op in tx.metadata.ordinal_operations.iter() {
-        if let OrdinalOperation::InscriptionRevealed(data) = op {
-            updated_sats.insert(data.ordinal_number);
+    for op in tx.metadata.doginal_operations.iter() {
+        if let DoginalOperation::InscriptionRevealed(data) = op {
+            updated_sats.insert(data.doginal_number);
             *reveals_count += 1
         }
     }
@@ -221,7 +221,7 @@ pub async fn augment_transaction_with_ordinal_transfers(
             continue;
         };
         for watched_satpoint in entries.iter() {
-            if updated_sats.contains(&watched_satpoint.ordinal_number) {
+            if updated_sats.contains(&watched_satpoint.doginal_number) {
                 continue;
             }
             let koinupoint_pre_transfer = format!(
@@ -242,8 +242,8 @@ pub async fn augment_transaction_with_ordinal_transfers(
                     ctx,
                 );
 
-            let transfer_data = OrdinalInscriptionTransferData {
-                ordinal_number: watched_satpoint.ordinal_number,
+            let transfer_data = DoginalInscriptionTransferData {
+                doginal_number: watched_satpoint.doginal_number,
                 destination,
                 tx_index,
                 koinupoint_pre_transfer: koinupoint_pre_transfer.clone(),
@@ -257,14 +257,14 @@ pub async fn augment_transaction_with_ordinal_transfers(
 
             try_debug!(
                 ctx,
-                "Inscription transfer detected on Satoshi {ordinal_number} ({koinupoint_pre_transfer} -> {koinupoint_post_transfer}) \
+                "Inscription transfer detected on Satoshi {doginal_number} ({koinupoint_pre_transfer} -> {koinupoint_post_transfer}) \
                 at block #{block_index}",
-                ordinal_number = transfer_data.ordinal_number,
+                doginal_number = transfer_data.doginal_number,
                 block_index = block_identifier.index
             );
             tx.metadata
-                .ordinal_operations
-                .push(OrdinalOperation::InscriptionTransferred(transfer_data));
+                .doginal_operations
+                .push(DoginalOperation::InscriptionTransferred(transfer_data));
             *transfers_count += 1;
         }
     }
@@ -277,8 +277,8 @@ mod test {
     use bitcoin::Network;
     use dogecoin::{
         types::{
-            OrdinalInscriptionNumber, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
-            OrdinalInscriptionTransferDestination, OrdinalOperation,
+            DoginalInscriptionNumber, DoginalInscriptionRevealData, DoginalInscriptionTransferData,
+            DoginalInscriptionTransferDestination, DoginalOperation,
         },
         utils::Context,
     };
@@ -297,7 +297,7 @@ mod test {
 
     #[tokio::test]
     async fn tracks_chained_satoshi_transfers_in_block() -> Result<(), String> {
-        let ordinal_number: u64 = 283888212016616;
+        let doginal_number: u64 = 283888212016616;
         let inscription_id =
             "cbc9fcf9373cbae36f4868d73a0ad78bbdc58af7c813e6319163e101a8cac8adi1245".to_string();
         let block_height_1: u64 = 874387;
@@ -320,13 +320,13 @@ mod test {
                             "0xcbc9fcf9373cbae36f4868d73a0ad78bbdc58af7c813e6319163e101a8cac8ad"
                                 .into(),
                         )
-                        .add_ordinal_operation(
-                            OrdinalOperation::InscriptionRevealed(
-                                OrdinalInscriptionRevealData {
+                        .add_doginal_operation(
+                            DoginalOperation::InscriptionRevealed(
+                                DoginalInscriptionRevealData {
                                     content_bytes: "0x".into(),
                                     content_type: "".into(),
                                     content_length: 0,
-                                    inscription_number: OrdinalInscriptionNumber { classic: 79754112, jubilee: 79754112 },
+                                    inscription_number: DoginalInscriptionNumber { classic: 79754112, jubilee: 79754112 },
                                     inscription_fee: 1161069,
                                     inscription_output_value: 546,
                                     inscription_id,
@@ -337,9 +337,9 @@ mod test {
                                     metaprotocol: None,
                                     metadata: None,
                                     parents: vec![],
-                                    ordinal_number,
-                                    ordinal_block_height: 56777,
-                                    ordinal_offset: 0,
+                                    doginal_number,
+                                    doginal_block_height: 56777,
+                                    doginal_offset: 0,
                                     tx_index: 0,
                                     transfers_pre_inscription: 0,
                                     koinupoint_post_inscription: "cbc9fcf9373cbae36f4868d73a0ad78bbdc58af7c813e6319163e101a8cac8ad:0:0".into(),
@@ -406,10 +406,10 @@ mod test {
 
             // 3. Make sure the correct transfers were produced
             assert_eq!(
-                &block.transactions[1].metadata.ordinal_operations[0],
-                &OrdinalOperation::InscriptionTransferred(OrdinalInscriptionTransferData {
-                    ordinal_number,
-                    destination: OrdinalInscriptionTransferDestination::Transferred(
+                &block.transactions[1].metadata.doginal_operations[0],
+                &DoginalOperation::InscriptionTransferred(DoginalInscriptionTransferData {
+                    doginal_number,
+                    destination: DoginalInscriptionTransferDestination::Transferred(
                         "bc1pp9z0rmh34re5aaxskkpgdfg3zkrc40wmas4r60vvtqdhrlcufw7qmgufuz".into()
                     ),
                     koinupoint_pre_transfer:
@@ -423,10 +423,10 @@ mod test {
                 })
             );
             assert_eq!(
-                &block.transactions[2].metadata.ordinal_operations[0],
-                &OrdinalOperation::InscriptionTransferred(OrdinalInscriptionTransferData {
-                    ordinal_number,
-                    destination: OrdinalInscriptionTransferDestination::Transferred(
+                &block.transactions[2].metadata.doginal_operations[0],
+                &DoginalOperation::InscriptionTransferred(DoginalInscriptionTransferData {
+                    doginal_number,
+                    destination: DoginalInscriptionTransferDestination::Transferred(
                         "bc1p3qus9j7ucg0c4s2pf7k70nlpkk7r3ddt4u2ek54wn6nuwkzm9twqfenmjm".into()
                     ),
                     koinupoint_pre_transfer:
@@ -460,7 +460,7 @@ mod test {
 
         assert_eq!(
             destination,
-            OrdinalInscriptionTransferDestination::SpentInFees
+            DoginalInscriptionTransferDestination::SpentInFees
         );
         assert_eq!(
             satpoint,
@@ -488,7 +488,7 @@ mod test {
 
         assert_eq!(
             destination,
-            OrdinalInscriptionTransferDestination::Burnt("OP_RETURN OP_PUSHBYTES_36 aa21a9edd3ce297baa3ee8fd96ecd7613f2743552e2f91ed4864540cf059835ff5b35cff".to_string())
+            DoginalInscriptionTransferDestination::Burnt("OP_RETURN OP_PUSHBYTES_36 aa21a9edd3ce297baa3ee8fd96ecd7613f2743552e2f91ed4864540cf059835ff5b35cff".to_string())
         );
         assert_eq!(
             satpoint,

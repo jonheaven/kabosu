@@ -215,10 +215,10 @@ impl ConfigToml {
                         .to_string(),
                 ),
             };
-        let ordinals = match toml.doginals {
-            Some(ordinals) => Some(DoginalConfig {
-                db: ordinals.db.to_config(),
-                meta_protocols: match ordinals.meta_protocols {
+        let doginals = match toml.doginals {
+            Some(doginals) => Some(DoginalConfig {
+                db: doginals.db.to_config(),
+                meta_protocols: match doginals.meta_protocols {
                     Some(meta_protocols) => Some(DoginalMetaProtocolsConfig {
                         drc20: match meta_protocols.drc20 {
                             Some(drc20) => Some(DoginalDrc20Config {
@@ -233,7 +233,7 @@ impl ConfigToml {
                     }),
                     None => None,
                 },
-                predicates: ordinals.predicates.map(|p| DoginalsPredicatesConfig {
+                predicates: doginals.predicates.map(|p| DoginalsPredicatesConfig {
                     enabled: p.enabled.unwrap_or(false),
                     mime_types: p.mime_types.unwrap_or_default(),
                     content_prefixes: p.content_prefixes.unwrap_or_default(),
@@ -241,10 +241,10 @@ impl ConfigToml {
             }),
             None => None,
         };
-        let runes = match toml.dunes {
-            Some(runes) => Some(DunesConfig {
-                lru_cache_size: runes.lru_cache_size.unwrap_or(DEFAULT_LRU_CACHE_SIZE),
-                db: runes.db.to_config(),
+        let dunes = match toml.dunes {
+            Some(dunes) => Some(DunesConfig {
+                lru_cache_size: dunes.lru_cache_size.unwrap_or(DEFAULT_LRU_CACHE_SIZE),
+                db: dunes.db.to_config(),
             }),
             None => None,
         };
@@ -319,8 +319,8 @@ impl ConfigToml {
                     .working_dir
                     .unwrap_or(DEFAULT_WORKING_DIR.into()),
             },
-            doginals: ordinals,
-            dunes: runes,
+            doginals: doginals,
+            dunes: dunes,
             start_block: toml.start_block,
             stop_block: toml.stop_block,
             resources: ResourcesConfig {

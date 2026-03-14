@@ -7,52 +7,53 @@ use dogecoin::{
     bitcoincore_rpc::Client as BitcoinRpcClient,
     try_debug, try_error, try_warn,
     types::dogecoin::TxIn,
-    utils::{bitcoind::dogecoin_get_client, Context},
+    utils::{dogecoind::dogecoin_get_client, Context},
 };
 use doginals_parser::{Cenotaph, Dune, DuneId, Dunestone, Edict, Etching, Height};
 use lru::LruCache;
 use postgres::pg_pool_client;
 
 use super::{
-    db_cache::DbCache, input_rune_balance::InputRuneBalance, transaction_cache::TransactionCache,
+    db_cache::DbCache, transaction_cache::TransactionCache,
     transaction_location::TransactionLocation, utils::move_block_output_cache_to_output_cache,
 };
+use crate::db::InputDuneBalance;
 use crate::db::{
     cache::{
-        dune_validation::rune_etching_has_valid_commit, utils::input_rune_balances_from_tx_inputs,
+        dune_validation::dune_etching_has_valid_commit, utils::input_dune_balances_from_tx_inputs,
     },
     models::{
         db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry,
-        db_ledger_operation::DbLedgerOperation, db_rune::DbDune, db_supply_change::DbSupplyChange,
+        db_ledger_operation::DbLedgerOperation, db_dune::DbDune, db_supply_change::DbSupplyChange,
     },
-    pg_get_max_rune_number, pg_get_rune_by_id, pg_get_rune_total_mints,
+    pg_get_max_dune_number, pg_get_dune_by_id, pg_get_dune_total_mints,
 };
 
-/// Holds rune data across multiple blocks for faster computations. Processes rune events as they happen during transactions and
+/// Holds dune data across multiple blocks for faster computations. Processes dune events as they happen during transactions and
 /// generates database rows for later insertion.
 pub struct IndexCache {
     pub network: Network,
-    /// Number to be assigned to the next rune etching.
-    next_rune_number: u32,
-    /// LRU cache for runes.
-    rune_cache: LruCache<DuneId, DbDune>,
-    /// LRU cache for total mints for runes.
-    rune_total_mints_cache: LruCache<DuneId, u128>,
-    /// LRU cache for outputs with rune balances.
-    output_cache: LruCache<(String, u32), HashMap<DuneId, Vec<InputRuneBalance>>>,
+    /// Number to be assigned to the next dune etching.
+    next_dune_number: u32,
+    /// LRU cache for dunes.
+    dune_cache: LruCache<DuneId, DbDune>,
+    /// LRU cache for total mints for dunes.
+    dune_total_mints_cache: LruCache<DuneId, u128>,
+    /// LRU cache for outputs with dune balances.
+    output_cache: LruCache<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
     /// Same as above but only for the current block. We use a `HashMap` instead of an LRU cache to make sure we keep all outputs
     /// in memory while we index this block. Must be cleared every time a new block is processed.
-    block_output_cache: HashMap<(String, u32), HashMap<DuneId, Vec<InputRuneBalance>>>,
-    /// Holds a single transaction's rune cache. Must be cleared every time a new transaction is processed.
+    block_output_cache: HashMap<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
+    /// Holds a single transaction's dune cache. Must be cleared every time a new transaction is processed.
     tx_cache: TransactionCache,
     /// Keeps rows that have not yet been inserted in the DB.
     pub db_cache: DbCache,
-    /// Bitcoin RPC client used to validate rune commitments.
-    pub bitcoin_client: BitcoinRpcClient,
+    /// Bitcoin RPC client used to validate dune commitments.
+    pub dogecoin_client: BitcoinRpcClient,
     /// Bitcoin RPC client configuration.
-    bitcoin_client_config: DogecoinConfig,
-    /// Current minimum unlocked rune name threshold for explicit names.
-    minimum_rune: Dune,
+    dogecoin_client_config: DogecoinConfig,
+    /// Current minimum unlocked dune name threshold for explicit names.
+    minimum_dune: Dune,
 }
 
 impl IndexCache {
@@ -60,12 +61,12 @@ impl IndexCache {
         let pg_client = pg_pool_client(pg_pool).await.unwrap();
         let network = config.dogecoin.network;
         let cap = NonZeroUsize::new(config.dunes.as_ref().unwrap().lru_cache_size).unwrap();
-        let bitcoin_client = dogecoin_get_client(&config.dogecoin, ctx);
+        let dogecoin_client = dogecoin_get_client(&config.dogecoin, ctx);
         IndexCache {
             network,
-            next_rune_number: pg_get_max_rune_number(&pg_client).await + 1,
-            rune_cache: LruCache::new(cap),
-            rune_total_mints_cache: LruCache::new(cap),
+            next_dune_number: pg_get_max_dune_number(&pg_client).await + 1,
+            dune_cache: LruCache::new(cap),
+            dune_total_mints_cache: LruCache::new(cap),
             output_cache: LruCache::new(cap),
             block_output_cache: HashMap::new(),
             tx_cache: TransactionCache::new(
@@ -83,19 +84,19 @@ impl IndexCache {
                 0,
             ),
             db_cache: DbCache::new(),
-            bitcoin_client,
-            bitcoin_client_config: config.dogecoin.clone(),
-            minimum_rune: Dune(0),
+            dogecoin_client,
+            dogecoin_client_config: config.dogecoin.clone(),
+            minimum_dune: Dune(0),
         }
     }
 
     /// Recreate and replace the internal Bitcoin RPC client
-    pub fn reconnect_bitcoin_client(&mut self, ctx: &Context) {
-        self.bitcoin_client = dogecoin_get_client(&self.bitcoin_client_config, ctx);
+    pub fn reconnect_dogecoin_client(&mut self, ctx: &Context) {
+        self.dogecoin_client = dogecoin_get_client(&self.dogecoin_client_config, ctx);
     }
 
-    pub async fn reset_max_rune_number(&mut self, db_tx: &mut Transaction<'_>) {
-        self.next_rune_number = pg_get_max_rune_number(db_tx).await + 1;
+    pub async fn reset_max_dune_number(&mut self, db_tx: &mut Transaction<'_>) {
+        self.next_dune_number = pg_get_max_dune_number(db_tx).await + 1;
     }
 
     /// Creates a fresh transaction index cache.
@@ -111,10 +112,10 @@ impl IndexCache {
         ctx: &Context,
     ) {
         // Update the dynamic minimum name threshold based on current block height.
-        self.minimum_rune =
+        self.minimum_dune =
             Dune::minimum_at_height(self.network, Height(location.block_height as u32));
 
-        let input_runes = input_rune_balances_from_tx_inputs(
+        let input_dunes = input_dune_balances_from_tx_inputs(
             tx_inputs,
             &self.block_output_cache,
             &mut self.output_cache,
@@ -124,10 +125,10 @@ impl IndexCache {
         .await;
         #[cfg(not(feature = "release"))]
         {
-            for (rune_id, balances) in input_runes.iter() {
-                try_debug!(ctx, "INPUT {rune_id} {balances:?} {location}");
+            for (dune_id, balances) in input_dunes.iter() {
+                try_debug!(ctx, "INPUT {dune_id} {balances:?} {location}");
             }
-            if !input_runes.is_empty() {
+            if !input_dunes.is_empty() {
                 try_debug!(
                     ctx,
                     "First output: {first_eligible_output:?}, total_outputs: {total_outputs}"
@@ -136,7 +137,7 @@ impl IndexCache {
         }
         self.tx_cache = TransactionCache::new(
             location,
-            input_runes,
+            input_dunes,
             eligible_outputs,
             first_eligible_output,
             total_outputs,
@@ -156,14 +157,14 @@ impl IndexCache {
         );
     }
 
-    pub async fn apply_runestone(
+    pub async fn apply_dunestone(
         &mut self,
-        runestone: &Dunestone,
+        dunestone: &Dunestone,
         _db_tx: &mut Transaction<'_>,
         ctx: &Context,
     ) {
-        try_debug!(ctx, "{:?} {}", runestone, self.tx_cache.location);
-        if let Some(new_pointer) = runestone.pointer {
+        try_debug!(ctx, "{:?} {}", dunestone, self.tx_cache.location);
+        if let Some(new_pointer) = dunestone.pointer {
             self.tx_cache.output_pointer = Some(new_pointer);
         }
     }
@@ -192,64 +193,64 @@ impl IndexCache {
     ) -> Result<(), String> {
         match etching.dune {
             // Explicitly reserved names are rejected
-            Some(rune) if rune.is_reserved() => {
+            Some(dune) if dune.is_reserved() => {
                 try_debug!(
                     ctx,
-                    "Skipping etching with explicitly reserved rune {}",
-                    rune
+                    "Skipping etching with explicitly reserved dune {}",
+                    dune
                 );
                 return Ok(());
             }
             // Reject explicit names that are below the currently unlocked minimum.
-            Some(rune) if rune < self.minimum_rune => {
+            Some(dune) if dune < self.minimum_dune => {
                 try_debug!(
                     ctx,
                     "Skipping etching with name {} below minimum {} at {}",
-                    rune,
-                    self.minimum_rune,
+                    dune,
+                    self.minimum_dune,
                     self.tx_cache.location.to_string()
                 );
                 return Ok(());
             }
             // Explicit non-reserved names require commit validation
-            Some(rune) => {
-                if !rune_etching_has_valid_commit(
-                    &self.bitcoin_client,
+            Some(dune) => {
+                if !dune_etching_has_valid_commit(
+                    &self.dogecoin_client,
                     ctx,
                     bitcoin_tx,
-                    &rune,
+                    &dune,
                     self.tx_cache.location.block_height as u32,
                     inputs_counter,
                 )
                 .await?
                 {
-                    try_error!(ctx, "Invalid rune commitment for etching {rune}");
+                    try_error!(ctx, "Invalid dune commitment for etching {dune}");
                     return Ok(());
                 }
             }
             None => {}
         }
 
-        let (rune_id, db_rune, entry) = self.tx_cache.apply_etching(etching, self.next_rune_number);
+        let (dune_id, db_dune, entry) = self.tx_cache.apply_etching(etching, self.next_dune_number);
 
         try_debug!(
             ctx,
             "Etching {spaced_name} ({id}) {location}",
-            spaced_name = &db_rune.spaced_name,
-            id = &db_rune.id,
+            spaced_name = &db_dune.spaced_name,
+            id = &db_dune.id,
             location = self.tx_cache.location.to_string()
         );
-        self.db_cache.runes.push(db_rune.clone());
-        self.rune_cache.put(rune_id, db_rune);
+        self.db_cache.dunes.push(db_dune.clone());
+        self.dune_cache.put(dune_id, db_dune);
         self.add_ledger_entries_to_db_cache(&vec![entry]);
-        self.next_rune_number += 1;
+        self.next_dune_number += 1;
         *etchings_counter += 1;
         Ok(())
     }
 
     pub async fn apply_cenotaph_etching(
         &mut self,
-        rune: &Dune,
+        dune: &Dune,
         _db_tx: &mut Transaction<'_>,
         ctx: &Context,
         cenotaph_etchings_counter: &mut u64,
@@ -257,88 +258,88 @@ impl IndexCache {
         inputs_counter: &mut u64,
     ) -> Result<(), String> {
         // Explicitly reserved names are rejected
-        if rune.is_reserved() {
+        if dune.is_reserved() {
             try_debug!(
                 ctx,
-                "Skipping cenotaph etching with explicitly reserved rune {}",
-                rune
+                "Skipping cenotaph etching with explicitly reserved dune {}",
+                dune
             );
             return Ok(());
         }
 
         // Reject names that are below the currently unlocked minimum
-        if *rune < self.minimum_rune {
+        if *dune < self.minimum_dune {
             try_debug!(
                 ctx,
                 "Skipping cenotaph etching with name {} below minimum {} at {}",
-                rune,
-                self.minimum_rune,
+                dune,
+                self.minimum_dune,
                 self.tx_cache.location.to_string()
             );
             return Ok(());
         }
 
         // Validate commit for cenotaph etchings as well
-        if !rune_etching_has_valid_commit(
-            &self.bitcoin_client,
+        if !dune_etching_has_valid_commit(
+            &self.dogecoin_client,
             ctx,
             bitcoin_tx,
-            rune,
+            dune,
             self.tx_cache.location.block_height as u32,
             inputs_counter,
         )
         .await?
         {
-            try_error!(ctx, "Invalid rune commitment for cenotaph etching {rune}");
+            try_error!(ctx, "Invalid dune commitment for cenotaph etching {dune}");
             return Ok(());
         }
 
-        let (rune_id, db_rune, entry) = self
+        let (dune_id, db_dune, entry) = self
             .tx_cache
-            .apply_cenotaph_etching(rune, self.next_rune_number);
+            .apply_cenotaph_etching(dune, self.next_dune_number);
         try_debug!(
             ctx,
             "Etching cenotaph {spaced_name} ({id}) {location}",
-            spaced_name = &db_rune.spaced_name,
-            id = &db_rune.id,
+            spaced_name = &db_dune.spaced_name,
+            id = &db_dune.id,
             location = self.tx_cache.location.to_string()
         );
-        self.db_cache.runes.push(db_rune.clone());
-        self.rune_cache.put(rune_id, db_rune);
+        self.db_cache.dunes.push(db_dune.clone());
+        self.dune_cache.put(dune_id, db_dune);
         self.add_ledger_entries_to_db_cache(&vec![entry]);
-        self.next_rune_number += 1;
+        self.next_dune_number += 1;
         *cenotaph_etchings_counter += 1;
         Ok(())
     }
 
     pub async fn apply_mint(
         &mut self,
-        rune_id: &DuneId,
+        dune_id: &DuneId,
         db_tx: &mut Transaction<'_>,
         ctx: &Context,
         mints_counter: &mut u64,
     ) {
-        let Some(db_rune) = self.get_cached_rune_by_rune_id(rune_id, db_tx, ctx).await else {
+        let Some(db_dune) = self.get_cached_dune_by_dune_id(dune_id, db_tx, ctx).await else {
             try_warn!(
                 ctx,
-                "Dune {rune_id} not found for mint {location}",
+                "Dune {dune_id} not found for mint {location}",
                 location = self.tx_cache.location.to_string()
             );
             return;
         };
         let total_mints = self
-            .get_cached_rune_total_mints(rune_id, db_tx, ctx)
+            .get_cached_dune_total_mints(dune_id, db_tx, ctx)
             .await
             .unwrap_or(0);
         if let Some(ledger_entry) = self
             .tx_cache
-            .apply_mint(rune_id, total_mints, &db_rune, ctx)
+            .apply_mint(dune_id, total_mints, &db_dune, ctx)
         {
             self.add_ledger_entries_to_db_cache(&vec![ledger_entry.clone()]);
-            if let Some(total) = self.rune_total_mints_cache.get_mut(rune_id) {
+            if let Some(total) = self.dune_total_mints_cache.get_mut(dune_id) {
                 *total += 1;
             } else {
-                self.rune_total_mints_cache.put(*rune_id, 1);
+                self.dune_total_mints_cache.put(*dune_id, 1);
             }
             *mints_counter += 1;
         }
@@ -346,32 +347,32 @@ impl IndexCache {
 
     pub async fn apply_cenotaph_mint(
         &mut self,
-        rune_id: &DuneId,
+        dune_id: &DuneId,
         db_tx: &mut Transaction<'_>,
         ctx: &Context,
         cenotaph_mints_counter: &mut u64,
     ) {
-        let Some(db_rune) = self.get_cached_rune_by_rune_id(rune_id, db_tx, ctx).await else {
+        let Some(db_dune) = self.get_cached_dune_by_dune_id(dune_id, db_tx, ctx).await else {
             try_warn!(
                 ctx,
-                "Dune {rune_id} not found for cenotaph mint {location}",
+                "Dune {dune_id} not found for cenotaph mint {location}",
                 location = self.tx_cache.location.to_string()
             );
             return;
         };
         let total_mints = self
-            .get_cached_rune_total_mints(rune_id, db_tx, ctx)
+            .get_cached_dune_total_mints(dune_id, db_tx, ctx)
             .await
             .unwrap_or(0);
         if let Some(ledger_entry) =
             self.tx_cache
-                .apply_cenotaph_mint(rune_id, total_mints, &db_rune, ctx)
+                .apply_cenotaph_mint(dune_id, total_mints, &db_dune, ctx)
         {
             self.add_ledger_entries_to_db_cache(&vec![ledger_entry]);
-            if let Some(total) = self.rune_total_mints_cache.get_mut(rune_id) {
+            if let Some(total) = self.dune_total_mints_cache.get_mut(dune_id) {
                 *total += 1;
             } else {
-                self.rune_total_mints_cache.put(*rune_id, 1);
+                self.dune_total_mints_cache.put(*dune_id, 1);
             }
             *cenotaph_mints_counter += 1;
         }
@@ -384,7 +385,7 @@ impl IndexCache {
         ctx: &Context,
         edicts_number: &mut u64,
     ) {
-        let Some(db_rune) = self.get_cached_rune_by_rune_id(&edict.id, db_tx, ctx).await else {
+        let Some(db_dune) = self.get_cached_dune_by_dune_id(&edict.id, db_tx, ctx).await else {
             try_warn!(
                 ctx,
                 "Dune {id} not found for edict {location}",
@@ -398,7 +399,7 @@ impl IndexCache {
             try_debug!(
                 ctx,
                 "Edict {spaced_name} {amount} {location}",
-                spaced_name = &db_rune.spaced_name,
+                spaced_name = &db_dune.spaced_name,
                 amount = entry.amount.unwrap().0,
                 location = self.tx_cache.location.to_string()
             );
@@ -407,45 +408,45 @@ impl IndexCache {
         self.add_ledger_entries_to_db_cache(&entries);
     }
 
-    async fn get_cached_rune_by_rune_id(
+    async fn get_cached_dune_by_dune_id(
         &mut self,
-        rune_id: &DuneId,
+        dune_id: &DuneId,
         db_tx: &mut Transaction<'_>,
         ctx: &Context,
     ) -> Option<DbDune> {
-        // Id 0:0 is used to mean the rune being etched in this transaction, if any.
-        if rune_id.block == 0 && rune_id.tx == 0 {
+        // Id 0:0 is used to mean the dune being etched in this transaction, if any.
+        if dune_id.block == 0 && dune_id.tx == 0 {
             return self.tx_cache.etching.clone();
         }
-        if let Some(cached_rune) = self.rune_cache.get(rune_id) {
-            return Some(cached_rune.clone());
+        if let Some(cached_dune) = self.dune_cache.get(dune_id) {
+            return Some(cached_dune.clone());
         }
         // Cache miss, look in DB.
         self.db_cache.flush(db_tx, ctx).await;
-        let db_rune = pg_get_rune_by_id(rune_id, db_tx, ctx).await?;
-        self.rune_cache.put(*rune_id, db_rune.clone());
-        Some(db_rune)
+        let db_dune = pg_get_dune_by_id(dune_id, db_tx, ctx).await?;
+        self.dune_cache.put(*dune_id, db_dune.clone());
+        Some(db_dune)
     }
 
-    async fn get_cached_rune_total_mints(
+    async fn get_cached_dune_total_mints(
         &mut self,
-        rune_id: &DuneId,
+        dune_id: &DuneId,
         db_tx: &mut Transaction<'_>,
         ctx: &Context,
     ) -> Option<u128> {
-        let real_rune_id = if rune_id.block == 0 && rune_id.tx == 0 {
+        let real_dune_id = if dune_id.block == 0 && dune_id.tx == 0 {
             let etching = self.tx_cache.etching.as_ref()?;
             DuneId::from_str(etching.id.as_str()).unwrap()
         } else {
-            *rune_id
+            *dune_id
         };
-        if let Some(total) = self.rune_total_mints_cache.get(&real_rune_id) {
+        if let Some(total) = self.dune_total_mints_cache.get(&real_dune_id) {
             return Some(*total);
         }
         // Cache miss, look in DB.
         self.db_cache.flush(db_tx, ctx).await;
-        let total = pg_get_rune_total_mints(rune_id, db_tx, ctx).await?;
-        self.rune_total_mints_cache.put(*rune_id, total);
+        let total = pg_get_dune_total_mints(dune_id, db_tx, ctx).await?;
+        self.dune_total_mints_cache.put(*dune_id, total);
         Some(total)
     }
 
@@ -458,26 +459,26 @@ impl IndexCache {
                 DbLedgerOperation::Etching => {
                     self.db_cache
                         .supply_changes
-                        .entry(entry.rune_id.clone())
+                        .entry(entry.dune_id.clone())
                         .and_modify(|i| {
                             i.total_operations += 1;
                         })
                         .or_insert(DbSupplyChange::from_operation(
-                            entry.rune_id.clone(),
+                            entry.dune_id.clone(),
                             entry.block_height,
                         ));
                 }
                 DbLedgerOperation::Mint => {
                     self.db_cache
                         .supply_changes
-                        .entry(entry.rune_id.clone())
+                        .entry(entry.dune_id.clone())
                         .and_modify(|i| {
                             i.minted += entry.amount.unwrap();
                             i.total_mints += 1;
                             i.total_operations += 1;
                         })
                         .or_insert(DbSupplyChange::from_mint(
-                            entry.rune_id.clone(),
+                            entry.dune_id.clone(),
                             entry.block_height,
                             entry.amount.unwrap(),
                         ));
@@ -485,14 +486,14 @@ impl IndexCache {
                 DbLedgerOperation::Burn => {
                     self.db_cache
                         .supply_changes
-                        .entry(entry.rune_id.clone())
+                        .entry(entry.dune_id.clone())
                         .and_modify(|i| {
                             i.burned += entry.amount.unwrap();
                             i.total_burns += 1;
                             i.total_operations += 1;
                         })
                         .or_insert(DbSupplyChange::from_burn(
-                            entry.rune_id.clone(),
+                            entry.dune_id.clone(),
                             entry.block_height,
                             entry.amount.unwrap(),
                         ));
@@ -500,19 +501,19 @@ impl IndexCache {
                 DbLedgerOperation::Send => {
                     self.db_cache
                         .supply_changes
-                        .entry(entry.rune_id.clone())
+                        .entry(entry.dune_id.clone())
                         .and_modify(|i| i.total_operations += 1)
                         .or_insert(DbSupplyChange::from_operation(
-                            entry.rune_id.clone(),
+                            entry.dune_id.clone(),
                             entry.block_height,
                         ));
                     if let Some(address) = entry.address.clone() {
                         self.db_cache
                             .balance_deductions
-                            .entry((entry.rune_id.clone(), address.clone()))
+                            .entry((entry.dune_id.clone(), address.clone()))
                             .and_modify(|i| i.balance += entry.amount.unwrap())
                             .or_insert(DbBalanceChange::from_operation(
-                                entry.rune_id.clone(),
+                                entry.dune_id.clone(),
                                 entry.block_height,
                                 address,
                                 entry.amount.unwrap(),
@@ -522,36 +523,41 @@ impl IndexCache {
                 DbLedgerOperation::Receive => {
                     self.db_cache
                         .supply_changes
-                        .entry(entry.rune_id.clone())
+                        .entry(entry.dune_id.clone())
                         .and_modify(|i| i.total_operations += 1)
                         .or_insert(DbSupplyChange::from_operation(
-                            entry.rune_id.clone(),
+                            entry.dune_id.clone(),
                             entry.block_height,
                         ));
                     if let Some(address) = entry.address.clone() {
                         self.db_cache
                             .balance_increases
-                            .entry((entry.rune_id.clone(), address.clone()))
+                            .entry((entry.dune_id.clone(), address.clone()))
                             .and_modify(|i| i.balance += entry.amount.unwrap())
                             .or_insert(DbBalanceChange::from_operation(
-                                entry.rune_id.clone(),
+                                entry.dune_id.clone(),
                                 entry.block_height,
                                 address,
                                 entry.amount.unwrap(),
                             ));
                         // Add to current block's output cache if it's received balance.
                         let k = (entry.tx_id.clone(), entry.output.unwrap().0);
-                        let rune_id = DuneId::from_str(entry.rune_id.as_str()).unwrap();
-                        let balance = InputRuneBalance {
-                            address: entry.address.clone(),
-                            amount: entry.amount.unwrap().0,
+                        let dune_id = DuneId::from_str(entry.dune_id.as_str()).unwrap();
+                        let balance = InputDuneBalance {
+                            dune_id: entry.dune_id.clone(),
+                            balance: entry.amount.unwrap().0 as u64,
+                            txid: entry.tx_id.clone(),
+                            vout: entry.output.unwrap().0,
+                            address: entry.address.clone().unwrap_or_default(),
+                            block_height: entry.block_height.0 as u64,
+                            timestamp: entry.timestamp.0 as u64,
                         };
                         let mut default = HashMap::new();
-                        default.insert(rune_id, vec![balance.clone()]);
+                        default.insert(dune_id, vec![balance.clone()]);
                         self.block_output_cache
                             .entry(k)
                             .and_modify(|i| {
-                                i.entry(rune_id)
+                                i.entry(dune_id)
                                     .and_modify(|v| v.push(balance.clone()))
                                     .or_insert(vec![balance]);
                             })
@@ -581,9 +587,9 @@ mod tests {
         let cap = std::num::NonZeroUsize::new(1).unwrap();
         let mut index = IndexCache {
             network,
-            next_rune_number: 1,
-            rune_cache: lru::LruCache::new(cap),
-            rune_total_mints_cache: lru::LruCache::new(cap),
+            next_dune_number: 1,
+            dune_cache: lru::LruCache::new(cap),
+            dune_total_mints_cache: lru::LruCache::new(cap),
             output_cache: lru::LruCache::new(cap),
             block_output_cache: HashMap::new(),
             tx_cache: TransactionCache::new(
@@ -601,15 +607,15 @@ mod tests {
                 0,
             ),
             db_cache: DbCache::new(),
-            bitcoin_client: bitcoind::utils::bitcoind::dogecoin_get_client(
-                &Config::test_default().bitcoind,
+            dogecoin_client: dogecoind::utils::dogecoind::dogecoin_get_client(
+                &Config::test_default().dogecoind,
                 &ctx,
             ),
-            bitcoin_client_config: Config::test_default().bitcoind,
-            minimum_rune: Dune::minimum_at_height(network, Height(840_000)),
+            dogecoin_client_config: Config::test_default().dogecoind,
+            minimum_dune: Dune::minimum_at_height(network, Height(840_000)),
         };
 
-        let start_n = index.next_rune_number;
+        let start_n = index.next_dune_number;
 
         // Deadpool transaction to satisfy signature (won't be used due to early returns)
         let pool = pg_pool(&PgDatabaseConfig {
@@ -636,7 +642,7 @@ mod tests {
 
         // Reserved explicit name
         let etching_reserved = Etching {
-            rune: Some(Dune::reserved(840_000, 0)),
+            dune: Some(Dune::reserved(840_000, 0)),
             ..Default::default()
         };
         let res_reserved = index
@@ -650,11 +656,11 @@ mod tests {
             )
             .await;
         assert!(res_reserved.is_ok());
-        assert_eq!(index.next_rune_number, start_n);
+        assert_eq!(index.next_dune_number, start_n);
 
         // Lexicographically above max name
         let etching_above_max = Etching {
-            rune: Some("DOGDOGDOGDOGDOGDOGDOGDOG".parse().unwrap()),
+            dune: Some("DOGDOGDOGDOGDOGDOGDOGDOG".parse().unwrap()),
             ..Default::default()
         };
         let res_above = index
@@ -668,11 +674,11 @@ mod tests {
             )
             .await;
         assert!(res_above.is_ok());
-        assert_eq!(index.next_rune_number, start_n);
+        assert_eq!(index.next_dune_number, start_n);
 
-        // Below minimum should also be skipped; choose a small rune 'A'
+        // Below minimum should also be skipped; choose a small dune 'A'
         let etching_below_min = Etching {
-            rune: Some("A".parse().unwrap()),
+            dune: Some("A".parse().unwrap()),
             ..Default::default()
         };
         let res_below = index
@@ -686,6 +692,6 @@ mod tests {
             )
             .await;
         assert!(res_below.is_ok());
-        assert_eq!(index.next_rune_number, start_n);
+        assert_eq!(index.next_dune_number, start_n);
     }
 }

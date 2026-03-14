@@ -6,7 +6,7 @@ use std::{
 use config::Config;
 use deadpool_postgres::GenericClient;
 use dogecoin::types::{
-    BlockIdentifier, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
+    BlockIdentifier, DoginalInscriptionRevealData, DoginalInscriptionTransferData,
     TransactionIdentifier,
 };
 use lru::LruCache;
@@ -22,7 +22,7 @@ use crate::core::protocol::koinu_tracking::parse_output_and_offset_from_koinupoi
 
 /// If the given `config` has BRC-20 enabled, returns a BRC-20 memory cache.
 pub fn drc20_new_cache(config: &Config) -> Option<Brc20MemoryCache> {
-    let drc20 = config.ordinals_drc20_config()?;
+    let drc20 = config.doginals_drc20_config()?;
     if !drc20.enabled {
         return None;
     }
@@ -147,52 +147,52 @@ impl Brc20MemoryCache {
 
     pub async fn get_unsent_token_transfers<T: GenericClient>(
         &mut self,
-        ordinal_numbers: &Vec<&u64>,
+        doginal_numbers: &Vec<&u64>,
         client: &T,
     ) -> Result<Vec<DbOperation>, String> {
         let mut results = vec![];
-        let mut cache_missed_ordinal_numbers = HashSet::new();
-        for ordinal_number in ordinal_numbers.iter() {
+        let mut cache_missed_doginal_numbers = HashSet::new();
+        for doginal_number in doginal_numbers.iter() {
             // Use `get` instead of `contains` so we promote this value in the LRU.
-            if self.ignored_inscriptions.get(*ordinal_number).is_some() {
+            if self.ignored_inscriptions.get(*doginal_number).is_some() {
                 continue;
             }
-            if let Some(row) = self.unsent_transfers.get(*ordinal_number) {
+            if let Some(row) = self.unsent_transfers.get(*doginal_number) {
                 results.push(row.clone());
             } else {
-                cache_missed_ordinal_numbers.insert(**ordinal_number);
+                cache_missed_doginal_numbers.insert(**doginal_number);
             }
         }
-        if !cache_missed_ordinal_numbers.is_empty() {
-            // Some ordinal numbers were not in cache, check DB.
+        if !cache_missed_doginal_numbers.is_empty() {
+            // Some doginal numbers were not in cache, check DB.
             self.handle_cache_miss(client).await?;
-            let missed_ordinal_numbers: Vec<u64> =
-                cache_missed_ordinal_numbers.iter().cloned().collect();
+            let missed_doginal_numbers: Vec<u64> =
+                cache_missed_doginal_numbers.iter().cloned().collect();
             let pending_transfers =
-                drc20_pg::get_unsent_token_transfers(&missed_ordinal_numbers, client).await?;
+                drc20_pg::get_unsent_token_transfers(&missed_doginal_numbers, client).await?;
             for unsent_transfer in pending_transfers.into_iter() {
-                cache_missed_ordinal_numbers.remove(&unsent_transfer.ordinal_number.0);
+                cache_missed_doginal_numbers.remove(&unsent_transfer.doginal_number.0);
                 self.unsent_transfers
-                    .put(unsent_transfer.ordinal_number.0, unsent_transfer.clone());
+                    .put(unsent_transfer.doginal_number.0, unsent_transfer.clone());
                 results.push(unsent_transfer);
             }
             // Ignore all irrelevant numbers.
-            for irrelevant_number in cache_missed_ordinal_numbers.iter() {
+            for irrelevant_number in cache_missed_doginal_numbers.iter() {
                 self.ignore_inscription(*irrelevant_number);
             }
         }
         Ok(results)
     }
 
-    /// Marks an ordinal number as ignored so we don't bother computing its transfers for DRC20 purposes.
-    pub fn ignore_inscription(&mut self, ordinal_number: u64) {
-        self.ignored_inscriptions.put(ordinal_number, true);
+    /// Marks an doginal number as ignored so we don't bother computing its transfers for DRC20 purposes.
+    pub fn ignore_inscription(&mut self, doginal_number: u64) {
+        self.ignored_inscriptions.put(doginal_number, true);
     }
 
     pub fn insert_token_deploy(
         &mut self,
         data: &VerifiedDrc20TokenDeployData,
-        reveal: &OrdinalInscriptionRevealData,
+        reveal: &DoginalInscriptionRevealData,
         block_identifier: &BlockIdentifier,
         timestamp: u32,
         tx_identifier: &TransactionIdentifier,
@@ -231,7 +231,7 @@ impl Brc20MemoryCache {
             operation,
             inscription_id: reveal.inscription_id.clone(),
             inscription_number: reveal.inscription_number.jubilee,
-            ordinal_number: PgNumericU64(reveal.ordinal_number),
+            doginal_number: PgNumericU64(reveal.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             block_hash: block_identifier.hash[2..].to_string(),
             tx_id: tx_identifier.hash[2..].to_string(),
@@ -244,7 +244,7 @@ impl Brc20MemoryCache {
             amount: PgNumericU128(0),
         });
         self.increase_token_operation_count(data.tick.clone(), 1);
-        self.ignore_inscription(reveal.ordinal_number);
+        self.ignore_inscription(reveal.doginal_number);
         Ok(())
     }
 
@@ -252,7 +252,7 @@ impl Brc20MemoryCache {
     pub async fn insert_token_mint<T: GenericClient>(
         &mut self,
         data: &VerifiedDrc20BalanceData,
-        reveal: &OrdinalInscriptionRevealData,
+        reveal: &DoginalInscriptionRevealData,
         block_identifier: &BlockIdentifier,
         timestamp: u32,
         tx_identifier: &TransactionIdentifier,
@@ -280,7 +280,7 @@ impl Brc20MemoryCache {
         self.db_cache.operations.push(DbOperation {
             inscription_id: reveal.inscription_id.clone(),
             inscription_number: reveal.inscription_number.jubilee,
-            ordinal_number: PgNumericU64(reveal.ordinal_number),
+            doginal_number: PgNumericU64(reveal.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             tx_index: PgNumericU64(tx_index),
             ticker: data.tick.clone(),
@@ -300,7 +300,7 @@ impl Brc20MemoryCache {
             .entry(data.tick.clone())
             .and_modify(|c| *c += data.amt)
             .or_insert(PgNumericU128(data.amt));
-        self.ignore_inscription(reveal.ordinal_number);
+        self.ignore_inscription(reveal.doginal_number);
         Ok(())
     }
 
@@ -308,7 +308,7 @@ impl Brc20MemoryCache {
     pub async fn insert_token_transfer<T: GenericClient>(
         &mut self,
         data: &VerifiedDrc20BalanceData,
-        reveal: &OrdinalInscriptionRevealData,
+        reveal: &DoginalInscriptionRevealData,
         block_identifier: &BlockIdentifier,
         timestamp: u32,
         tx_identifier: &TransactionIdentifier,
@@ -333,7 +333,7 @@ impl Brc20MemoryCache {
         let ledger_row = DbOperation {
             inscription_id: reveal.inscription_id.clone(),
             inscription_number: reveal.inscription_number.jubilee,
-            ordinal_number: PgNumericU64(reveal.ordinal_number),
+            doginal_number: PgNumericU64(reveal.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             tx_index: PgNumericU64(tx_index),
             ticker: data.tick.clone(),
@@ -349,9 +349,9 @@ impl Brc20MemoryCache {
         };
         self.increase_token_operation_count(data.tick.clone(), 1);
         self.unsent_transfers
-            .put(reveal.ordinal_number, ledger_row.clone());
+            .put(reveal.doginal_number, ledger_row.clone());
         self.db_cache.operations.push(ledger_row);
-        self.ignored_inscriptions.pop(&reveal.ordinal_number); // Just in case.
+        self.ignored_inscriptions.pop(&reveal.doginal_number); // Just in case.
         Ok(())
     }
 
@@ -359,7 +359,7 @@ impl Brc20MemoryCache {
     pub async fn insert_token_transfer_send<T: GenericClient>(
         &mut self,
         data: &VerifiedDrc20TransferData,
-        transfer: &OrdinalInscriptionTransferData,
+        transfer: &DoginalInscriptionTransferData,
         block_identifier: &BlockIdentifier,
         timestamp: u32,
         tx_identifier: &TransactionIdentifier,
@@ -369,7 +369,7 @@ impl Brc20MemoryCache {
         let (output, offset) =
             parse_output_and_offset_from_koinupoint(&transfer.koinupoint_post_transfer)?;
         let transfer_row = self
-            .get_unsent_transfer_row(transfer.ordinal_number, client)
+            .get_unsent_transfer_row(transfer.doginal_number, client)
             .await?;
         let operation = "transfer_send".to_string();
         self.increase_operation_count(operation.clone(), 1);
@@ -384,7 +384,7 @@ impl Brc20MemoryCache {
         self.db_cache.operations.push(DbOperation {
             inscription_id: transfer_row.inscription_id.clone(),
             inscription_number: transfer_row.inscription_number,
-            ordinal_number: PgNumericU64(transfer.ordinal_number),
+            doginal_number: PgNumericU64(transfer.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             tx_index: PgNumericU64(tx_index),
             ticker: data.tick.clone(),
@@ -401,7 +401,7 @@ impl Brc20MemoryCache {
         self.db_cache.operations.push(DbOperation {
             inscription_id: transfer_row.inscription_id.clone(),
             inscription_number: transfer_row.inscription_number,
-            ordinal_number: PgNumericU64(transfer.ordinal_number),
+            doginal_number: PgNumericU64(transfer.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             tx_index: PgNumericU64(tx_index),
             ticker: data.tick.clone(),
@@ -425,8 +425,8 @@ impl Brc20MemoryCache {
             balance + data.amt, // Increase for receiver.
         );
         // We're not interested in further transfers.
-        self.unsent_transfers.pop(&transfer.ordinal_number);
-        self.ignore_inscription(transfer.ordinal_number);
+        self.unsent_transfers.pop(&transfer.doginal_number);
+        self.ignore_inscription(transfer.doginal_number);
         Ok(())
     }
 
@@ -464,18 +464,18 @@ impl Brc20MemoryCache {
 
     async fn get_unsent_transfer_row<T: GenericClient>(
         &mut self,
-        ordinal_number: u64,
+        doginal_number: u64,
         client: &T,
     ) -> Result<DbOperation, String> {
-        if let Some(transfer) = self.unsent_transfers.get(&ordinal_number) {
+        if let Some(transfer) = self.unsent_transfers.get(&doginal_number) {
             return Ok(transfer.clone());
         }
         self.handle_cache_miss(client).await?;
-        let transfers = drc20_pg::get_unsent_token_transfers(&vec![ordinal_number], client).await?;
+        let transfers = drc20_pg::get_unsent_token_transfers(&vec![doginal_number], client).await?;
         let Some(transfer) = transfers.first() else {
-            unreachable!("Invalid transfer ordinal number {}", ordinal_number)
+            unreachable!("Invalid transfer doginal number {}", doginal_number)
         };
-        self.unsent_transfers.put(ordinal_number, transfer.clone());
+        self.unsent_transfers.put(doginal_number, transfer.clone());
         Ok(transfer.clone())
     }
 

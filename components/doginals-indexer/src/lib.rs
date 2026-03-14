@@ -50,20 +50,20 @@ pub mod utils;
 
 #[derive(Debug, Clone)]
 pub struct PgConnectionPools {
-    pub ordinals: Pool,
+    pub doginals: Pool,
     pub drc20: Option<Pool>,
 }
 
 fn pg_pools(config: &Config) -> PgConnectionPools {
     PgConnectionPools {
-        ordinals: pg_pool(&config.doginals.as_ref().unwrap().db).unwrap(),
+        doginals: pg_pool(&config.doginals.as_ref().unwrap().db).unwrap(),
         drc20: config
-            .ordinals_drc20_config()
+            .doginals_drc20_config()
             .map(|drc20| pg_pool(&drc20.db).unwrap()),
     }
 }
 
-async fn new_ordinals_indexer_runloop(
+async fn new_doginals_indexer_runloop(
     prometheus: &PrometheusMonitoring,
     abort_signal: &Arc<AtomicBool>,
     config: &Config,
@@ -79,7 +79,7 @@ async fn new_ordinals_indexer_runloop(
     let pg_pools_moved = pg_pools.clone();
     let prometheus_moved = prometheus.clone();
     let abort_signal_moved = abort_signal.clone();
-    let handle: JoinHandle<()> = hiro_system_kit::thread_named("ordinals_indexer")
+    let handle: JoinHandle<()> = hiro_system_kit::thread_named("doginals_indexer")
         .spawn(move || {
             future_block_on(&ctx_moved.clone(), async move {
                 let cache_l2 = Arc::new(new_traversals_lazy_cache(2048));
@@ -150,9 +150,9 @@ async fn new_ordinals_indexer_runloop(
                                 for block in &blocks {
                                     recent_blocks_cache.put(block.block_identifier.index, block.block_identifier.hash.clone());
                                     for tx in &block.transactions {
-                                        for op in &tx.metadata.ordinal_operations {
-                                            if let dogecoin::types::OrdinalOperation::InscriptionTransferred(data) = op {
-                                                recent_owners_cache.insert(data.ordinal_number, format!("{:?}", data.destination));
+                                        for op in &tx.metadata.doginal_operations {
+                                            if let dogecoin::types::DoginalOperation::InscriptionTransferred(data) = op {
+                                                recent_owners_cache.insert(data.doginal_number, format!("{:?}", data.destination));
                                             }
                                         }
                                     }
@@ -172,7 +172,7 @@ async fn new_ordinals_indexer_runloop(
                                 break;
                             }
                         },
-                        Err(e) => return Err(format!("ordinals indexer channel error: {e}")),
+                        Err(e) => return Err(format!("doginals indexer channel error: {e}")),
                     }
                 }
                 try_info!(ctx_moved, "DoginalIndexer thread complete");
@@ -182,7 +182,7 @@ async fn new_ordinals_indexer_runloop(
         .expect("unable to spawn thread");
 
     let pg_chain_tip = {
-        let ord_client = pg_pool_client(&pg_pools.ordinals).await?;
+        let ord_client = pg_pool_client(&pg_pools.doginals).await?;
         db::doginals_pg::get_chain_tip(&ord_client).await?
     };
     let blocks_chain_tip = {
@@ -381,7 +381,7 @@ pub async fn rollback_block_range(
         .map_err(|e| format!("error dropping rollback blocks from rocksdb: {e}"))
 }
 
-/// Starts the ordinals indexing process. Will block the main thread indefinitely until explicitly stopped or it reaches chain tip
+/// Starts the doginals indexing process. Will block the main thread indefinitely until explicitly stopped or it reaches chain tip
 /// and `stream_blocks_at_chain_tip` is set to false.
 pub async fn start_doginals_indexer(
     stream_blocks_at_chain_tip: bool,
@@ -395,7 +395,7 @@ pub async fn start_doginals_indexer(
 
     // Initialize metrics with current state
     let max_inscription_number = {
-        let ord_client = pg_pool_client(&pg_pools.ordinals).await?;
+        let ord_client = pg_pool_client(&pg_pools.doginals).await?;
         doginals_pg::get_highest_inscription_number(&ord_client)
             .await?
             .unwrap_or(0) as u64
@@ -405,7 +405,7 @@ pub async fn start_doginals_indexer(
         .initialize(max_inscription_number, chain_tip.index, &pg_pools)
         .await?;
 
-    let mut indexer = new_ordinals_indexer_runloop(&prometheus, abort_signal, config, ctx).await?;
+    let mut indexer = new_doginals_indexer_runloop(&prometheus, abort_signal, config, ctx).await?;
 
     if let Some(metrics) = &config.metrics {
         if metrics.enabled {
@@ -478,7 +478,7 @@ pub async fn scan_doginals<W: Write + Send + 'static>(
     ctx: &Context,
 ) -> Result<u64, String> {
     use crossbeam_channel::bounded;
-    use dogecoin::{types::OrdinalOperation, IndexerCommand};
+    use dogecoin::{types::DoginalOperation, IndexerCommand};
 
     if from_block > to_block {
         return Err(format!(
@@ -541,9 +541,9 @@ pub async fn scan_doginals<W: Write + Send + 'static>(
                                         &ctx_moved,
                                     );
                                     for tx in &block.transactions {
-                                        for op in &tx.metadata.ordinal_operations {
+                                        for op in &tx.metadata.doginal_operations {
                                             match op {
-                                                OrdinalOperation::InscriptionRevealed(reveal) => {
+                                                DoginalOperation::InscriptionRevealed(reveal) => {
                                                     if let Some(ref prefix) = opts_content_type {
                                                         if !reveal.content_type.starts_with(prefix.as_str()) {
                                                             continue;
@@ -569,7 +569,7 @@ pub async fn scan_doginals<W: Write + Send + 'static>(
                                                     let mut w = writer_moved.lock().unwrap();
                                                     let _ = writeln!(w, "{}", line);
                                                 }
-                                                OrdinalOperation::InscriptionTransferred(transfer) => {
+                                                DoginalOperation::InscriptionTransferred(transfer) => {
                                                     if opts_reveals_only {
                                                         continue;
                                                     }
@@ -579,7 +579,7 @@ pub async fn scan_doginals<W: Write + Send + 'static>(
                                                         "block_height": block.block_identifier.index,
                                                         "block_hash": block.block_identifier.hash,
                                                         "tx_id": tx.transaction_identifier.hash,
-                                                        "ordinal_number": transfer.ordinal_number,
+                                                        "doginal_number": transfer.doginal_number,
                                                         "destination": transfer.destination,
                                                     });
                                                     let mut w = writer_moved.lock().unwrap();

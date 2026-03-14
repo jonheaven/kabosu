@@ -5,7 +5,7 @@ use dogecoin::{
     try_debug, try_info,
     types::{
         BlockIdentifier, DogecoinBlockData, Drc20BalanceData, Drc20Operation, Drc20TokenDeployData,
-        Drc20TransferData, OrdinalInscriptionTransferData, OrdinalOperation, TransactionIdentifier,
+        Drc20TransferData, DoginalInscriptionTransferData, DoginalOperation, TransactionIdentifier,
     },
     utils::Context,
 };
@@ -21,9 +21,9 @@ use crate::{
     utils::monitoring::PrometheusMonitoring,
 };
 
-/// Index ordinal transfers in a single Bitcoin block looking for BRC-20 transfers.
+/// Index doginal transfers in a single Bitcoin block looking for BRC-20 transfers.
 async fn index_unverified_drc20_transfers(
-    transfers: &Vec<(&TransactionIdentifier, &OrdinalInscriptionTransferData)>,
+    transfers: &Vec<(&TransactionIdentifier, &DoginalInscriptionTransferData)>,
     block_identifier: &BlockIdentifier,
     timestamp: u32,
     drc20_cache: &mut Brc20MemoryCache,
@@ -93,9 +93,9 @@ pub async fn index_block_and_insert_drc20_operations(
     try_info!(ctx, "Starting BRC-20 indexing for block #{block_height}...");
     let stopwatch = std::time::Instant::now();
 
-    // Ordinal transfers may be BRC-20 transfers. We group them into a vector to minimize round trips to the db when analyzing
+    // Doginal transfers may be BRC-20 transfers. We group them into a vector to minimize round trips to the db when analyzing
     // them. We will always insert them correctly in between new BRC-20 operations.
-    let mut unverified_ordinal_transfers = vec![];
+    let mut unverified_doginal_transfers = vec![];
     let mut verified_drc20_transfers = vec![];
 
     // Track counts of each operation type
@@ -106,18 +106,18 @@ pub async fn index_block_and_insert_drc20_operations(
 
     // Check every transaction in the block. Look for BRC-20 operations.
     for (tx_index, tx) in block.transactions.iter_mut().enumerate() {
-        for op in tx.metadata.ordinal_operations.iter() {
+        for op in tx.metadata.doginal_operations.iter() {
             match op {
-                OrdinalOperation::InscriptionRevealed(reveal) => {
+                DoginalOperation::InscriptionRevealed(reveal) => {
                     let Some(parsed_drc20_operation) =
                         drc20_operation_map.get(&reveal.inscription_id)
                     else {
-                        drc20_cache.ignore_inscription(reveal.ordinal_number);
+                        drc20_cache.ignore_inscription(reveal.doginal_number);
                         continue;
                     };
                     // First, verify any pending transfers as they may affect balances for the next operation.
                     let mut drc20_transfers = index_unverified_drc20_transfers(
-                        &unverified_ordinal_transfers,
+                        &unverified_doginal_transfers,
                         &block.block_identifier,
                         block.timestamp,
                         drc20_cache,
@@ -127,7 +127,7 @@ pub async fn index_block_and_insert_drc20_operations(
                     .await?;
                     transfer_send_count += drc20_transfers.len() as u64;
                     verified_drc20_transfers.append(&mut drc20_transfers);
-                    unverified_ordinal_transfers.clear();
+                    unverified_doginal_transfers.clear();
                     // Then continue with the new operation.
                     let Some(operation) = verify_drc20_operation(
                         parsed_drc20_operation,
@@ -140,7 +140,7 @@ pub async fn index_block_and_insert_drc20_operations(
                     )
                     .await?
                     else {
-                        drc20_cache.ignore_inscription(reveal.ordinal_number);
+                        drc20_cache.ignore_inscription(reveal.doginal_number);
                         continue;
                     };
                     match operation {
@@ -244,15 +244,15 @@ pub async fn index_block_and_insert_drc20_operations(
                         }
                     }
                 }
-                OrdinalOperation::InscriptionTransferred(transfer) => {
-                    unverified_ordinal_transfers.push((&tx.transaction_identifier, transfer));
+                DoginalOperation::InscriptionTransferred(transfer) => {
+                    unverified_doginal_transfers.push((&tx.transaction_identifier, transfer));
                 }
             }
         }
     }
-    // Verify any dangling ordinal transfers and augment these results back to the block.
+    // Verify any dangling doginal transfers and augment these results back to the block.
     let mut final_transfers = index_unverified_drc20_transfers(
-        &unverified_ordinal_transfers,
+        &unverified_doginal_transfers,
         &block.block_identifier,
         block.timestamp,
         drc20_cache,
@@ -301,7 +301,7 @@ mod test {
 
     use dogecoin::types::{
         Drc20BalanceData, Drc20Operation, Drc20TokenDeployData, Drc20TransferData,
-        OrdinalInscriptionTransferDestination, OrdinalOperation,
+        DoginalInscriptionTransferDestination, DoginalOperation,
     };
     use postgres::{pg_begin, pg_pool_client};
 
@@ -366,10 +366,10 @@ mod test {
                 .height(818000)
                 .add_transaction(
                     TestTransactionBuilder::new()
-                        .add_ordinal_operation(OrdinalOperation::InscriptionRevealed(
+                        .add_doginal_operation(DoginalOperation::InscriptionRevealed(
                             Brc20RevealBuilder::new()
                                 .inscription_number(0)
-                                .ordinal_number(100)
+                                .doginal_number(100)
                                 .inscription_id("01d6876703d25747bf5767f3d830548ebe09ffcade91d49e558eb9b6fd2d6d56i0")
                                 .inscriber_address(Some("19PFYXeUuArA3vRDHh2zz8tupAYNFqjBCP".to_string()))
                                 .build(),
@@ -378,10 +378,10 @@ mod test {
                 )
                 .add_transaction(
                     TestTransactionBuilder::new()
-                        .add_ordinal_operation(OrdinalOperation::InscriptionRevealed(
+                        .add_doginal_operation(DoginalOperation::InscriptionRevealed(
                             Brc20RevealBuilder::new()
                                 .inscription_number(1)
-                                .ordinal_number(200)
+                                .doginal_number(200)
                                 .inscription_id("2e72578e1259b7dab363cb422ae1979ea329ffc0978c4a7552af907238db354ci0")
                                 .inscriber_address(Some("19PFYXeUuArA3vRDHh2zz8tupAYNFqjBCP".to_string()))
                                 .build(),
@@ -390,10 +390,10 @@ mod test {
                 )
                 .add_transaction(
                     TestTransactionBuilder::new()
-                        .add_ordinal_operation(OrdinalOperation::InscriptionRevealed(
+                        .add_doginal_operation(DoginalOperation::InscriptionRevealed(
                             Brc20RevealBuilder::new()
                                 .inscription_number(2)
-                                .ordinal_number(300)
+                                .doginal_number(300)
                                 .inscription_id("a8494261df7d4980af988dfc0241bb7ec95051afdbb86e3bea9c3ab055e898f3i0")
                                 .inscriber_address(Some("19PFYXeUuArA3vRDHh2zz8tupAYNFqjBCP".to_string()))
                                 .build(),
@@ -402,12 +402,12 @@ mod test {
                 )
                 .add_transaction(
                     TestTransactionBuilder::new()
-                        .add_ordinal_operation(OrdinalOperation::InscriptionTransferred(
+                        .add_doginal_operation(DoginalOperation::InscriptionTransferred(
                             Drc20TransferBuilder::new()
                                 .tx_index(3)
-                                .ordinal_number(300)
+                                .doginal_number(300)
                                 .destination(
-                                    OrdinalInscriptionTransferDestination::Transferred("3Ezed1AvfdnXFTMZqhMdhdq9hBMTqfx8Yz".to_string()
+                                    DoginalInscriptionTransferDestination::Transferred("3Ezed1AvfdnXFTMZqhMdhdq9hBMTqfx8Yz".to_string()
                                 ))
                                 .build()
                         ))

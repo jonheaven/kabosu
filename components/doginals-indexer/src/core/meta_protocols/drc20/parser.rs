@@ -268,7 +268,7 @@ mod test {
                 metadata: None,
                 metaprotocol: None,
                 parents: vec![],
-                rune: None,
+                dune: None,
                 pointer: None,
                 unrecognized_even_field: false,
                 delegate: None,

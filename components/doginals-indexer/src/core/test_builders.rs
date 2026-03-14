@@ -1,9 +1,10 @@
 use dogecoin::types::{
-    bitcoin::{OutPoint, TxIn, TxOut},
-    BitcoinTransactionMetadata, BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata,
-    DogecoinNetwork, DogecoinTransactionData, Drc20Operation, OrdinalInscriptionNumber,
-    OrdinalInscriptionRevealData, OrdinalOperation, TransactionIdentifier,
+    dogecoin::{OutPoint, TxIn, TxOut},
+    BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata,
+    DogecoinNetwork, DogecoinTransactionData, Drc20Operation, DoginalInscriptionNumber,
+    DoginalInscriptionRevealData, DoginalOperation, TransactionIdentifier,
 };
+use dogecoin::types::rosetta::DogecoinTransactionMetadata;
 
 pub struct TestBlockBuilder {
     pub height: u64,
@@ -64,7 +65,7 @@ pub struct TestTransactionBuilder {
     hash: String,
     inputs: Vec<TxIn>,
     outputs: Vec<TxOut>,
-    ordinal_operations: Vec<OrdinalOperation>,
+    doginal_operations: Vec<DoginalOperation>,
     drc20_operation: Option<Drc20Operation>,
 }
 
@@ -72,7 +73,7 @@ impl TestTransactionBuilder {
     pub fn new() -> Self {
         TestTransactionBuilder {
             hash: "0xb61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735".to_string(),
-            ordinal_operations: vec![],
+            doginal_operations: vec![],
             inputs: vec![],
             outputs: vec![],
             drc20_operation: None,
@@ -81,12 +82,12 @@ impl TestTransactionBuilder {
 
     pub fn new_with_operation() -> Self {
         let mut tx = Self::new();
-        tx.ordinal_operations = vec![OrdinalOperation::InscriptionRevealed(
-            OrdinalInscriptionRevealData {
+        tx.doginal_operations = vec![DoginalOperation::InscriptionRevealed(
+            DoginalInscriptionRevealData {
                 content_bytes: "0x7b200a20202270223a20226272632d3230222c0a2020226f70223a20226465706c6f79222c0a2020227469636b223a20226f726469222c0a2020226d6178223a20223231303030303030222c0a2020226c696d223a202231303030220a7d".to_string(),
                 content_type: "text/plain;charset=utf-8".to_string(),
                 content_length: 94,
-                inscription_number: OrdinalInscriptionNumber { classic: 0, jubilee: 0 },
+                inscription_number: DoginalInscriptionNumber { classic: 0, jubilee: 0 },
                 inscription_fee: 0,
                 inscription_output_value: 0,
                 inscription_id: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735i0".to_string(),
@@ -97,9 +98,9 @@ impl TestTransactionBuilder {
                 metaprotocol: None,
                 metadata: None,
                 parents: vec![],
-                ordinal_number: 0,
-                ordinal_block_height: 0,
-                ordinal_offset: 0,
+                doginal_number: 0,
+                doginal_block_height: 0,
+                doginal_offset: 0,
                 tx_index: 0,
                 transfers_pre_inscription: 0,
                 koinupoint_post_inscription: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735:0:0".to_string(),
@@ -136,13 +137,13 @@ impl TestTransactionBuilder {
         self
     }
 
-    pub fn ordinal_operations(mut self, ordinal_operations: Vec<OrdinalOperation>) -> Self {
-        self.ordinal_operations = ordinal_operations;
+    pub fn doginal_operations(mut self, doginal_operations: Vec<DoginalOperation>) -> Self {
+        self.doginal_operations = doginal_operations;
         self
     }
 
-    pub fn add_ordinal_operation(mut self, ordinal_operation: OrdinalOperation) -> Self {
-        self.ordinal_operations.push(ordinal_operation);
+    pub fn add_doginal_operation(mut self, doginal_operation: DoginalOperation) -> Self {
+        self.doginal_operations.push(doginal_operation);
         self
     }
 
@@ -155,10 +156,10 @@ impl TestTransactionBuilder {
         DogecoinTransactionData {
             transaction_identifier: TransactionIdentifier { hash: self.hash },
             operations: vec![],
-            metadata: BitcoinTransactionMetadata {
+                metadata: DogecoinTransactionMetadata {
                 inputs: self.inputs,
                 outputs: self.outputs,
-                ordinal_operations: self.ordinal_operations,
+                doginal_operations: self.doginal_operations,
                 drc20_operation: self.drc20_operation,
                 proof: None,
                 fee: 0,
@@ -207,6 +208,7 @@ impl TestTxInBuilder {
     }
 
     pub fn build(self) -> TxIn {
+        // witness field removed, as TxIn does not have it
         TxIn {
             previous_output: OutPoint {
                 txid: TransactionIdentifier {
@@ -218,7 +220,6 @@ impl TestTxInBuilder {
             },
             script_sig: "".to_string(),
             sequence: 4294967293,
-            witness: self.witness,
         }
     }
 }

@@ -33,7 +33,7 @@ use crate::{
     },
     types::{BlockIdentifier, DogecoinBlockData, DogecoinNetwork},
     utils::{
-        bitcoind::{dogecoin_get_chain_tip, dogecoin_wait_for_chain_tip},
+        dogecoind::{dogecoin_get_chain_tip, dogecoin_wait_for_chain_tip},
         future_block_on, Context,
     },
 };

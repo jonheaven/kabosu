@@ -1,8 +1,8 @@
 mod cursor;
 pub mod dogecoin;
-mod ordinals;
-mod rosetta;
+mod doginals;
+pub mod rosetta;
 
 pub use cursor::*;
-pub use ordinals::*;
+pub use doginals::*;
 pub use rosetta::*;

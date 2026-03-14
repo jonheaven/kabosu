@@ -13,14 +13,53 @@ use dogecoin::{
     utils::Context,
 };
 use doginals_parser::{Artifact, Dunestone, Flaw};
+// Local definitions for missing types
+// Local definitions for missing types
+// Local definitions for missing types
+// ...existing code...
 use postgres::pg_begin;
 
-use super::{cache::index_cache::IndexCache, pg_get_max_rune_number, pg_roll_back_block};
+use super::{cache::index_cache::IndexCache, pg_get_max_dune_number, pg_roll_back_block};
+// Local definitions for missing types
+#[derive(Debug, Clone)]
+pub struct DogecoinBlockMetadata {
+    pub network: Network,
+}
+
+#[derive(Debug, Clone)]
+pub struct DogecoinTransactionMetadata {
+    pub inputs: Vec<RosettaTxIn>,
+    pub outputs: Vec<RosettaTxOut>,
+    pub doginal_operations: Vec<()>, // Replace with actual type if available
+    pub drc20_operation: Option<()>, // Replace with actual type if available
+    pub proof: Option<String>,
+    pub fee: u64,
+    pub index: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RosettaOutPoint {
+    pub txid: Txid,
+    pub vout: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RosettaTxIn {
+    pub previous_output: RosettaOutPoint,
+    pub script_sig: ScriptBuf,
+    pub sequence: Sequence,
+    pub witness: Witness,
+}
+
+#[derive(Debug, Clone)]
+pub struct RosettaTxOut {
+    pub script_pubkey: ScriptBuf,
+    pub value: Amount,
+}
 use crate::{
     db::cache::transaction_location::TransactionLocation, utils::monitoring::PrometheusMonitoring,
 };
-
-pub fn get_rune_genesis_block_height(network: Network) -> u64 {
+pub fn get_dune_genesis_block_height(network: Network) -> u64 {
     match network {
         // Dogecoin Dunes activation height is intentionally unset for now.
         // Use u64::MAX so indexing stays disabled until explicitly activated.
@@ -33,7 +72,7 @@ pub fn get_rune_genesis_block_height(network: Network) -> u64 {
 }
 
 /// Transforms a Bitcoin transaction from a Chainhook format to a rust bitcoin crate format so it can be parsed by the ord crate
-/// to look for `Artifact`s. Also, takes all non-OP_RETURN outputs and returns them so they can be used later to receive runes.
+/// to look for `Artifact`s. Also, takes all non-OP_RETURN outputs and returns them so they can be used later to receive dunes.
 fn bitcoin_tx_from_chainhook_tx(
     block: &DogecoinBlockData,
     tx: &DogecoinTransactionData,
@@ -79,7 +118,7 @@ fn bitcoin_tx_from_chainhook_tx(
     )
 }
 
-/// Index a Bitcoin block for runes data.
+/// Index a Bitcoin block for dunes data.
 pub async fn index_block(
     pg_client: &mut Client,
     index_cache: &mut IndexCache,
@@ -90,7 +129,7 @@ pub async fn index_block(
     let stopwatch = std::time::Instant::now();
     let block_hash = &block.block_identifier.hash;
     let block_height = block.block_identifier.index;
-    try_info!(ctx, "RunesIndexer indexing block #{block_height}...");
+    try_info!(ctx, "DunesIndexer indexing block #{block_height}...");
 
     // Track operation counts
     let mut etching_count: u64 = 0;
@@ -102,7 +141,7 @@ pub async fn index_block(
     let mut inputs_count: u64 = 0;
 
     let mut db_tx = pg_begin(pg_client).await.unwrap();
-    index_cache.reset_max_rune_number(&mut db_tx).await;
+    index_cache.reset_max_dune_number(&mut db_tx).await;
 
     // Measure parsing time
     let parsing_start = std::time::Instant::now();
@@ -133,11 +172,11 @@ pub async fn index_block(
             .await;
         if let Some(artifact) = Dunestone::decipher(&transaction) {
             match artifact {
-                Artifact::Dunestone(runestone) => {
+                Artifact::Dunestone(dunestone) => {
                     index_cache
-                        .apply_runestone(&runestone, &mut db_tx, ctx)
+                        .apply_dunestone(&dunestone, &mut db_tx, ctx)
                         .await;
-                    if let Some(etching) = runestone.etching {
+                    if let Some(etching) = dunestone.etching {
                         index_cache
                             .apply_etching(
                                 &etching,
@@ -149,12 +188,12 @@ pub async fn index_block(
                             )
                             .await?;
                     }
-                    if let Some(mint_rune_id) = runestone.mint {
+                    if let Some(mint_dune_id) = dunestone.mint {
                         index_cache
-                            .apply_mint(&mint_rune_id, &mut db_tx, ctx, &mut mint_count)
+                            .apply_mint(&mint_dune_id, &mut db_tx, ctx, &mut mint_count)
                             .await;
                     }
-                    for edict in runestone.edicts.iter() {
+                    for edict in dunestone.edicts.iter() {
                         index_cache
                             .apply_edict(edict, &mut db_tx, ctx, &mut edict_count)
                             .await;
@@ -178,10 +217,10 @@ pub async fn index_block(
                                 )
                                 .await?;
                         }
-                        if let Some(mint_rune_id) = cenotaph.mint {
+                        if let Some(mint_dune_id) = cenotaph.mint {
                             index_cache
                                 .apply_cenotaph_mint(
-                                    &mint_rune_id,
+                                    &mint_dune_id,
                                     &mut db_tx,
                                     ctx,
                                     &mut cenotaph_mint_count,
@@ -194,41 +233,41 @@ pub async fn index_block(
         }
         index_cache.end_transaction(&mut db_tx, ctx);
     }
-    prometheus.metrics_record_rune_parsing_time(parsing_start.elapsed().as_millis() as f64);
+    prometheus.metrics_record_dune_parsing_time(parsing_start.elapsed().as_millis() as f64);
 
     // Measure computation time
     let computation_start = std::time::Instant::now();
     index_cache.end_block();
-    prometheus.metrics_record_rune_computation_time(computation_start.elapsed().as_millis() as f64);
+    prometheus.metrics_record_dune_computation_time(computation_start.elapsed().as_millis() as f64);
 
     // Measure database write time
-    let rune_db_write_start = std::time::Instant::now();
+    let dune_db_write_start = std::time::Instant::now();
     index_cache.db_cache.flush(&mut db_tx, ctx).await;
     db_tx
         .commit()
         .await
         .expect("Unable to commit pg transaction");
-    prometheus.metrics_record_rune_db_write_time(rune_db_write_start.elapsed().as_millis() as f64);
+    prometheus.metrics_record_dune_db_write_time(dune_db_write_start.elapsed().as_millis() as f64);
 
-    prometheus.metrics_record_runes_etching_per_block(etching_count);
-    prometheus.metrics_record_runes_edict_per_block(edict_count);
-    prometheus.metrics_record_runes_mint_per_block(mint_count);
-    prometheus.metrics_record_runes_cenotaph_per_block(cenotaph_count);
-    prometheus.metrics_record_runes_cenotaph_etching_per_block(cenotaph_etching_count);
-    prometheus.metrics_record_runes_cenotaph_mint_per_block(cenotaph_mint_count);
-    prometheus.metrics_record_runes_etching_inputs_checked_per_block(inputs_count);
+    prometheus.metrics_record_dunes_etching_per_block(etching_count);
+    prometheus.metrics_record_dunes_edict_per_block(edict_count);
+    prometheus.metrics_record_dunes_mint_per_block(mint_count);
+    prometheus.metrics_record_dunes_cenotaph_per_block(cenotaph_count);
+    prometheus.metrics_record_dunes_cenotaph_etching_per_block(cenotaph_etching_count);
+    prometheus.metrics_record_dunes_cenotaph_mint_per_block(cenotaph_mint_count);
+    prometheus.metrics_record_dunes_etching_inputs_checked_per_block(inputs_count);
     // Record metrics
     prometheus.metrics_block_indexed(block_height);
-    let current_rune_number = pg_get_max_rune_number(pg_client).await;
-    prometheus.metrics_rune_indexed(current_rune_number as u64);
-    prometheus.metrics_record_runes_per_block(etching_count);
+    let current_dune_number = pg_get_max_dune_number(pg_client).await;
+    prometheus.metrics_dune_indexed(current_dune_number as u64);
+    prometheus.metrics_record_dunes_per_block(etching_count);
 
     // Record overall processing time
     let elapsed = stopwatch.elapsed();
     prometheus.metrics_record_block_processing_time(elapsed.as_millis() as f64);
     try_info!(
         ctx,
-        "RunesIndexer indexed block #{block_height}: {etching_count} etchings, {mint_count} mints, {edict_count} edicts, {cenotaph_count} cenotaphs ({cenotaph_etching_count} etchings, {cenotaph_mint_count} mints) in {}s",
+        "DunesIndexer indexed block #{block_height}: {etching_count} etchings, {mint_count} mints, {edict_count} edicts, {cenotaph_count} cenotaphs ({cenotaph_etching_count} etchings, {cenotaph_mint_count} mints) in {}s",
         elapsed.as_secs_f32()
     );
 
@@ -258,10 +297,10 @@ pub async fn roll_back_block(pg_client: &mut Client, block_height: u64, ctx: &Co
 #[cfg(test)]
 mod tests {
     use dogecoin::types::{
-        bitcoin::{OutPoint as RosettaOutPoint, TxIn as RosettaTxIn, TxOut as RosettaTxOut},
-        BitcoinBlockMetadata, BitcoinNetwork, BitcoinTransactionMetadata, BlockIdentifier,
+        BlockIdentifier,
         DogecoinBlockData, DogecoinTransactionData, TransactionIdentifier,
     };
+    // Use local types
     use doginals_parser::Artifact;
 
     use super::*;
@@ -279,8 +318,8 @@ mod tests {
             },
             timestamp,
             transactions: vec![],
-            metadata: BitcoinBlockMetadata {
-                network: BitcoinNetwork::Mainnet,
+            metadata: DogecoinBlockMetadata {
+                network: Network::Bitcoin,
             },
         }
     }
@@ -288,47 +327,32 @@ mod tests {
     fn build_valid_tx() -> DogecoinTransactionData {
         // txid: 3a11c5bc4eee38645934607ba63e0d7ac834d399e53c7c06a0ced093a711f1a2
         let prevout = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0x1cf46d1a3192e5cdcce62441a7a40691ed4f7e34dc97dd3bfc7f96ff2069846e"
-                    .to_string(),
-            },
+            txid: Txid::from_str("1cf46d1a3192e5cdcce62441a7a40691ed4f7e34dc97dd3bfc7f96ff2069846e").unwrap(),
             vout: 0,
-            value: 351_058,
-            block_height: 840_000,
         };
 
         let inputs = vec![RosettaTxIn {
             previous_output: prevout,
-            script_sig: "".to_string(),
-            sequence: 5,
-            witness: vec![
-                "77109e8db640d44dd2528f192e9b58754a1178813550e0805aad4b3cbf8c079783f8bf21b2c59ee5713573b6e4f52f3546eac35367a21a0b37d66428d4d14a01".to_string(),
-                "203c7466c6b06e844514e7cfaee750cc3e30b97d0875ebc02e483218c2e0a23e57ac0063036f72645d0927f379cb8bcb678201010118746578742f706c61696e3b636861727365743d7574662d38000e4b4554414d494e454c4f54494f4e68".to_string(),
-                "c03c7466c6b06e844514e7cfaee750cc3e30b97d0875ebc02e483218c2e0a23e57".to_string(),
-            ],
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence(5),
+            witness: Witness::new(),
         }];
 
         let outputs = vec![
             RosettaTxOut {
                 // vout 0 - p2tr
-                script_pubkey:
-                    "0x5120f1e73bbd97fd0eac833e781abdbea9c223951aede9e2275ac6c03e8c1b24394b"
-                        .to_string(),
-                value: 546,
+                script_pubkey: ScriptBuf::from_bytes(hex::decode("5120f1e73bbd97fd0eac833e781abdbea9c223951aede9e2275ac6c03e8c1b24394b").unwrap()),
+                value: Amount::from_sat(546),
             },
             RosettaTxOut {
                 // vout 1 - p2tr
-                script_pubkey:
-                    "0x5120f1e73bbd97fd0eac833e781abdbea9c223951aede9e2275ac6c03e8c1b24394b"
-                        .to_string(),
-                value: 546,
+                script_pubkey: ScriptBuf::from_bytes(hex::decode("5120f1e73bbd97fd0eac833e781abdbea9c223951aede9e2275ac6c03e8c1b24394b").unwrap()),
+                value: Amount::from_sat(546),
             },
             RosettaTxOut {
-                // vout 2 - OP_RETURN runestone
-                script_pubkey:
-                    "0x6a5d22020704a7e6e7dbbcf1f2b38203010003800105bded070690c8020a6408aed3191601"
-                        .to_string(),
-                value: 0,
+                // vout 2 - OP_RETURN dunestone
+                script_pubkey: ScriptBuf::from_bytes(hex::decode("6a5d22020704a7e6e7dbbcf1f2b38203010003800105bded070690c8020a6408aed3191601").unwrap()),
+                value: Amount::from_sat(0),
             },
         ];
 
@@ -338,10 +362,10 @@ mod tests {
                     .to_string(),
             },
             operations: vec![],
-            metadata: BitcoinTransactionMetadata {
+            metadata: DogecoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 349_966,
@@ -353,42 +377,31 @@ mod tests {
     fn build_invalid_tx() -> DogecoinTransactionData {
         // txid: 66d084fe5e206c7183293d1e379caa2011e7750018c65dfd2fd3174ea9f298fc
         let prevout = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0x871fb5e4042dca1549326da5848bd2257d6e609984a0cfb867e4ff24a56806d0"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "871fb5e4042dca1549326da5848bd2257d6e609984a0cfb867e4ff24a56806d0"
+            ).unwrap(),
             vout: 0,
-            value: 300_000,
-            block_height: 840_000,
         };
 
         let inputs = vec![RosettaTxIn {
             previous_output: prevout,
-            script_sig: "".to_string(),
-            sequence: 4_294_967_293,
-            witness: vec![
-                "558699007abc57d8b87d8ba02a553f08d5b90758a0985fb5c237521dbb0d00e2c66250926de035235078a78aabeb496e087cdfc7553afb43d546fdd9d718dc7c".to_string(),
-                "20ab1fce37e4777d107690082ec5ee6213a2f008ed26602b8c23e49de911ba8b0dac0063074f9a9045bfc47c68".to_string(),
-                "c15976bfaf05d5b1cfbb8927abe2c93cf293edd2cdd408c2ba1ce484eb5621e980".to_string(),
-            ],
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence(4_294_967_293),
+            witness: Witness::new(),
         }];
 
         let outputs = vec![
             RosettaTxOut {
-                // vout 0 - OP_RETURN runestone
-                script_pubkey: "0x6a5d1b020304cfb4c2acf497b13e0380068094ebdc030a8094ebdc030801"
-                    .to_string(),
-                value: 0,
+                script_pubkey: ScriptBuf::from_bytes(hex::decode("6a5d1b020304cfb4c2acf497b13e0380068094ebdc030a8094ebdc030801").unwrap()),
+                value: Amount::from_sat(0),
             },
             RosettaTxOut {
-                // vout 1 - p2wpkh
-                script_pubkey: "0x0014f32b49757996ef8db8d3d029b3dc997560e77d12".to_string(),
-                value: 546,
+                script_pubkey: ScriptBuf::from_bytes(hex::decode("0014f32b49757996ef8db8d3d029b3dc997560e77d12").unwrap()),
+                value: Amount::from_sat(546),
             },
             RosettaTxOut {
-                // vout 2 - p2wpkh
-                script_pubkey: "0x001459966e46ce78b8bf4a54827b84144c82ea21811c".to_string(),
-                value: 15_765,
+                script_pubkey: ScriptBuf::from_bytes(hex::decode("001459966e46ce78b8bf4a54827b84144c82ea21811c").unwrap()),
+                value: Amount::from_sat(15765),
             },
         ];
 
@@ -398,10 +411,10 @@ mod tests {
                     .to_string(),
             },
             operations: vec![],
-            metadata: BitcoinTransactionMetadata {
+            metadata: DogecoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 283_689,
@@ -413,19 +426,17 @@ mod tests {
     fn build_no_commit_tx() -> DogecoinTransactionData {
         // txid: 27bbb1f7776d3ac5f41c17a5cde59b4feba5e9f5c5e76f19559c787a7c771055
         let prevout0 = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0x99060f5739abacbe53f568723d829cbef21b65d555950cfacf85baf78fc3724d"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "99060f5739abacbe53f568723d829cbef21b65d555950cfacf85baf78fc3724d"
+            ).unwrap(),
             vout: 0,
             value: 66_600,
             block_height: 840_000,
         };
         let prevout1 = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0x99060f5739abacbe53f568723d829cbef21b65d555950cfacf85baf78fc3724d"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "99060f5739abacbe53f568723d829cbef21b65d555950cfacf85baf78fc3724d"
+            ).unwrap(),
             vout: 1,
             value: 1_000_410,
             block_height: 840_000,
@@ -437,7 +448,7 @@ mod tests {
                 script_sig: "".to_string(),
                 sequence: 4_294_967_293,
                 witness: vec![
-                    "553d08ee034c7a84b790fb51e05ddffdc07b5ed5fd77774de888190cda69e1b14598194a40a6c6cba669c9e56eb2e95d5f0103a1ce8ee6ed3805a6f9b17fd216".to_string(),
+                    "553d08ee034c7a84b790fb51e05ddffdc07b5ed5fd7777774de888190cda69e1b14598194a40a6c6cba669c9e56eb2e95d5f0103a1ce8ee6ed3805a6f9b17fd216".to_string(),
                 ],
             },
             RosettaTxIn {
@@ -459,7 +470,7 @@ mod tests {
                 value: 419_010,
             },
             RosettaTxOut {
-                // vout 1 - OP_RETURN runestone
+                // vout 1 - OP_RETURN dunestone
                 script_pubkey:
                     "0x6a5d230207049efdc0b9d7cbf3cc1903800105ae4c06d8b9310ab20508b451106012c01f1601"
                         .to_string(),
@@ -476,7 +487,7 @@ mod tests {
             metadata: BitcoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 648_000,
@@ -485,13 +496,12 @@ mod tests {
         }
     }
 
-    fn build_rune_wrong_flaw_tx() -> DogecoinTransactionData {
+    fn build_dune_wrong_flaw_tx() -> DogecoinTransactionData {
         // txid: 8bf9d4ec8ed69ae7bac256285b06ae6566cec4679dcfb45b5671a323c2f18c3c
         let prevout = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0xbd546ac9aa0e275a7f06a960a54db0a9c0de634ad71805cb2d10418b3befc8e8"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "bd546ac9aa0e275a7f06a960a54db0a9c0de634ad71805cb2d10418b3befc8e8"
+            ).unwrap(),
             vout: 0,
             value: 437_000,
             block_height: 840_020,
@@ -510,7 +520,7 @@ mod tests {
 
         let outputs = vec![
             RosettaTxOut {
-                // vout 0 - OP_RETURN runestone
+                // vout 0 - OP_RETURN dunestone
                 script_pubkey:
                     "0x6a5d20020304a5accff7c3c4f6909420010003a00405b84106a096800ae8070888a401"
                         .to_string(),
@@ -539,7 +549,7 @@ mod tests {
             metadata: BitcoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 414_000,
@@ -552,10 +562,9 @@ mod tests {
         // txid: 66d084fe5e206c7183293d1e379caa2011e7750018c65dfd2fd3174ea9f298fc
         // This is the INTERNETGOLD transaction with truncated LEB128 field
         let prevout = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0x871fb5e4042dca1549326da5848bd2257d6e609984a0cfb867e4ff24a56806d0"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "871fb5e4042dca1549326da5848bd2257d6e609984a0cfb867e4ff24a56806d0"
+            ).unwrap(),
             vout: 0,
             value: 300_000,
             block_height: 840_020,
@@ -574,7 +583,7 @@ mod tests {
 
         let outputs = vec![
             RosettaTxOut {
-                // vout 0 - OP_RETURN runestone with truncated LEB128
+                // vout 0 - OP_RETURN dunestone with truncated LEB128
                 script_pubkey: "0x6a5d1b020304cfb4c2acf497b13e0380068094ebdc030a8094ebdc030801"
                     .to_string(),
                 value: 0,
@@ -600,7 +609,7 @@ mod tests {
             metadata: BitcoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 283_689,
@@ -613,10 +622,9 @@ mod tests {
         // txid: 89e8149d38f8b702621fa18310b10794e541c0b52478466b85f156f5622b8fe3
         // This is the ELONMUSKDOGE transaction
         let prevout = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0xde6c56ecf9212e8946c71267108cce91ccc71d378b55aa6a1f41a3d93a82e8cb"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "de6c56ecf9212e8946c71267108cce91ccc71d378b55aa6a1f41a3d93a82e8cb"
+            ).unwrap(),
             vout: 0,
             value: 407_000,
             block_height: 840_020,
@@ -635,7 +643,7 @@ mod tests {
 
         let outputs = vec![
             RosettaTxOut {
-                // vout 0 - OP_RETURN runestone
+                // vout 0 - OP_RETURN dunestone
                 script_pubkey:
                     "0x6a5d1f020304c6e6ffe9888ae1230300054506a096800ac0de810a08e80710f2a233"
                         .to_string(),
@@ -662,7 +670,7 @@ mod tests {
             metadata: BitcoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 386_000,
@@ -675,10 +683,9 @@ mod tests {
         // txid: c075c5eba59ca77c40085fc417c8adafa9d2c9970158c7311d60fb24e00d4b45
         // This is the WHATAREMFERS transaction
         let prevout = RosettaOutPoint {
-            txid: TransactionIdentifier {
-                hash: "0xee637d9afdaabd9d5fb64fb8bb0396b69b12c6d1f150a00a9692f3bc09c5f6e5"
-                    .to_string(),
-            },
+            txid: Txid::from_hex(
+                "ee637d9afdaabd9d5fb64fb8bb0396b69b12c6d1f150a00a9692f3bc09c5f6e5"
+            ).unwrap(),
             vout: 0,
             value: 304_000,
             block_height: 840_020,
@@ -697,7 +704,7 @@ mod tests {
 
         let outputs = vec![
             RosettaTxOut {
-                // vout 0 - OP_RETURN runestone
+                // vout 0 - OP_RETURN dunestone
                 script_pubkey: "0x6a5d24020304fac7f7e5f5b0fd97010348054d06a096800a904e0880b191640ca089310ec0843d"
                     .to_string(),
                 value: 0,
@@ -725,7 +732,7 @@ mod tests {
             metadata: BitcoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: 287_171,
@@ -765,7 +772,7 @@ mod tests {
         assert!(!eligible2.contains_key(&0)); // OP_RETURN excluded
 
         // art1: complete etching
-        let art1 = Dunestone::decipher(&tx1).expect("runestone");
+        let art1 = Dunestone::decipher(&tx1).expect("dunestone");
         let Artifact::Dunestone(rs1) = art1 else {
             panic!("expected Dunestone");
         };
@@ -780,7 +787,7 @@ mod tests {
         );
 
         // art2: incomplete etching (all optional fields empty, turbo == false)
-        let art2 = Dunestone::decipher(&tx2).expect("runestone");
+        let art2 = Dunestone::decipher(&tx2).expect("dunestone");
         let Artifact::Dunestone(rs2) = art2 else {
             // Non-Dunestone is acceptable for invalid tx
             return;
@@ -827,7 +834,7 @@ mod tests {
         };
 
         let artifact = doginals_parser::Dunestone::decipher(&tx)
-            .expect("expected Some(Artifact) for malformed runestone");
+            .expect("expected Some(Artifact) for malformed dunestone");
         match artifact {
             doginals_parser::Artifact::Cenotaph(c) => {
                 // No etching should be present when varint decoding fails
@@ -840,7 +847,7 @@ mod tests {
     // TODO: add condition to run only if postgres and bitcoind are running
     #[tokio::test]
     #[ignore]
-    async fn index_block_writes_valid_rune_and_rejects_invalid() {
+    async fn index_block_writes_valid_dune_and_rejects_invalid() {
         use config::Config;
         use doginals_parser::DuneId;
         use postgres::{pg_begin, pg_pool, pg_pool_client};
@@ -894,14 +901,14 @@ mod tests {
         let mut tx_valid = build_valid_tx();
         let mut tx_invalid = build_invalid_tx();
         let mut tx_no_commit = build_no_commit_tx();
-        let mut tx_rune_wrong_flaw = build_rune_wrong_flaw_tx();
+        let mut tx_dune_wrong_flaw = build_dune_wrong_flaw_tx();
         let mut tx_internetgold = build_internetgold_tx();
         let mut tx_elonmuskdoge = build_elonmuskdoge_tx();
         let mut tx_whataremfers = build_whataremfers_tx();
         tx_valid.metadata.index = 0;
         tx_invalid.metadata.index = 1;
         tx_no_commit.metadata.index = 2;
-        tx_rune_wrong_flaw.metadata.index = 3;
+        tx_dune_wrong_flaw.metadata.index = 3;
         tx_internetgold.metadata.index = 4;
         tx_elonmuskdoge.metadata.index = 5;
         tx_whataremfers.metadata.index = 6;
@@ -909,7 +916,7 @@ mod tests {
             tx_valid,
             tx_invalid,
             tx_no_commit,
-            tx_rune_wrong_flaw,
+            tx_dune_wrong_flaw,
             tx_internetgold,
             tx_elonmuskdoge,
             tx_whataremfers,
@@ -921,23 +928,23 @@ mod tests {
         // If bitcoind is unreachable, this will Err. Fail fast with context.
         result.expect("index_block should succeed with reachable bitcoind RPC");
 
-        // Verify DB contents: valid rune present, invalid and no-commit runes absent
+        // Verify DB contents: valid dune present, invalid and no-commit dunes absent
         let mut db_tx = pg_begin(&mut client).await.expect("tx");
         let valid_id = DuneId::from_str("840021:0").unwrap();
         let invalid_id = DuneId::from_str("840021:1").unwrap();
         let no_commit_id = DuneId::from_str("840021:2").unwrap();
-        let rune_wrong_flaw_id = DuneId::from_str("840021:3").unwrap();
+        let dune_wrong_flaw_id = DuneId::from_str("840021:3").unwrap();
         let internetgold_id = DuneId::from_str("840021:4").unwrap();
         let elonmuskdoge_id = DuneId::from_str("840021:5").unwrap();
         let whataremfers_id = DuneId::from_str("840021:6").unwrap();
-        let valid = crate::db::pg_get_rune_by_id(&valid_id, &mut db_tx, &ctx).await;
-        let invalid = crate::db::pg_get_rune_by_id(&invalid_id, &mut db_tx, &ctx).await;
-        let no_commit = crate::db::pg_get_rune_by_id(&no_commit_id, &mut db_tx, &ctx).await;
-        let rune_wrong_flaw =
-            crate::db::pg_get_rune_by_id(&rune_wrong_flaw_id, &mut db_tx, &ctx).await;
-        let internetgold = crate::db::pg_get_rune_by_id(&internetgold_id, &mut db_tx, &ctx).await;
-        let elonmuskdoge = crate::db::pg_get_rune_by_id(&elonmuskdoge_id, &mut db_tx, &ctx).await;
-        let whataremfers = crate::db::pg_get_rune_by_id(&whataremfers_id, &mut db_tx, &ctx).await;
+        let valid = crate::db::pg_get_dune_by_id(&valid_id, &mut db_tx, &ctx).await;
+        let invalid = crate::db::pg_get_dune_by_id(&invalid_id, &mut db_tx, &ctx).await;
+        let no_commit = crate::db::pg_get_dune_by_id(&no_commit_id, &mut db_tx, &ctx).await;
+        let dune_wrong_flaw =
+            crate::db::pg_get_dune_by_id(&dune_wrong_flaw_id, &mut db_tx, &ctx).await;
+        let internetgold = crate::db::pg_get_dune_by_id(&internetgold_id, &mut db_tx, &ctx).await;
+        let elonmuskdoge = crate::db::pg_get_dune_by_id(&elonmuskdoge_id, &mut db_tx, &ctx).await;
+        let whataremfers = crate::db::pg_get_dune_by_id(&whataremfers_id, &mut db_tx, &ctx).await;
         assert!(valid.is_some(), "valid etch should be inserted into DB");
         assert!(
             invalid.is_none(),
@@ -948,8 +955,8 @@ mod tests {
             "no-commit etch should not be inserted into DB"
         );
         assert!(
-            rune_wrong_flaw.is_some(),
-            "cenotaph rune etch should be inserted into DB"
+            dune_wrong_flaw.is_some(),
+            "cenotaph dune etch should be inserted into DB"
         );
         assert!(
             internetgold.is_none(),

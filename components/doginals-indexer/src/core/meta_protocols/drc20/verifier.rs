@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use deadpool_postgres::Transaction;
 use dogecoin::{
     types::{
-        BlockIdentifier, DogecoinNetwork, OrdinalInscriptionRevealData,
-        OrdinalInscriptionTransferData, OrdinalInscriptionTransferDestination,
+        BlockIdentifier, DogecoinNetwork, DoginalInscriptionRevealData,
+        DoginalInscriptionTransferData, DoginalInscriptionTransferDestination,
         TransactionIdentifier,
     },
     utils::Context,
@@ -54,7 +54,7 @@ pub enum VerifiedDrc20Operation {
 
 pub async fn verify_drc20_operation(
     operation: &ParsedDrc20Operation,
-    reveal: &OrdinalInscriptionRevealData,
+    reveal: &DoginalInscriptionRevealData,
     block_identifier: &BlockIdentifier,
     network: &DogecoinNetwork,
     cache: &mut Brc20MemoryCache,
@@ -221,10 +221,10 @@ pub async fn verify_drc20_operation(
     }
 }
 
-/// Given a list of ordinal transfers, verify which of them are valid `transfer_send` BRC-20 operations we haven't yet processed.
+/// Given a list of doginal transfers, verify which of them are valid `transfer_send` BRC-20 operations we haven't yet processed.
 /// Return verified transfer data for each valid operation.
 pub async fn verify_drc20_transfers(
-    transfers: &Vec<(&TransactionIdentifier, &OrdinalInscriptionTransferData)>,
+    transfers: &Vec<(&TransactionIdentifier, &DoginalInscriptionTransferData)>,
     cache: &mut Brc20MemoryCache,
     db_tx: &Transaction<'_>,
     ctx: &Context,
@@ -232,29 +232,29 @@ pub async fn verify_drc20_transfers(
     Vec<(
         String,
         VerifiedDrc20TransferData,
-        OrdinalInscriptionTransferData,
+        DoginalInscriptionTransferData,
         TransactionIdentifier,
     )>,
     String,
 > {
     try_debug!(
         ctx,
-        "BRC-20 verifying {} ordinal transfers",
+        "BRC-20 verifying {} doginal transfers",
         transfers.len()
     );
 
-    // Select ordinal numbers to analyze for pending DRC20 transfers.
-    let mut ordinal_numbers = vec![];
+    // Select doginal numbers to analyze for pending DRC20 transfers.
+    let mut doginal_numbers = vec![];
     let mut candidate_transfers = HashMap::new();
     for (tx_identifier, data) in transfers.iter() {
-        if !candidate_transfers.contains_key(&data.ordinal_number) {
-            ordinal_numbers.push(&data.ordinal_number);
-            candidate_transfers.insert(&data.ordinal_number, (*tx_identifier, *data));
+        if !candidate_transfers.contains_key(&data.doginal_number) {
+            doginal_numbers.push(&data.doginal_number);
+            candidate_transfers.insert(&data.doginal_number, (*tx_identifier, *data));
         }
     }
     // Check cache for said transfers.
     let db_operations = cache
-        .get_unsent_token_transfers(&ordinal_numbers, db_tx)
+        .get_unsent_token_transfers(&doginal_numbers, db_tx)
         .await?;
     if db_operations.is_empty() {
         return Ok(vec![]);
@@ -263,10 +263,10 @@ pub async fn verify_drc20_transfers(
     let mut results = vec![];
     for transfer_row in db_operations.into_iter() {
         let (tx_identifier, data) = candidate_transfers
-            .get(&transfer_row.ordinal_number.0)
+            .get(&transfer_row.doginal_number.0)
             .unwrap();
         let verified = match &data.destination {
-            OrdinalInscriptionTransferDestination::Transferred(receiver_address) => {
+            DoginalInscriptionTransferDestination::Transferred(receiver_address) => {
                 VerifiedDrc20TransferData {
                     tick: transfer_row.ticker.clone(),
                     amt: transfer_row.amount.0,
@@ -274,7 +274,7 @@ pub async fn verify_drc20_transfers(
                     receiver_address: receiver_address.to_string(),
                 }
             }
-            OrdinalInscriptionTransferDestination::SpentInFees => {
+            DoginalInscriptionTransferDestination::SpentInFees => {
                 VerifiedDrc20TransferData {
                     tick: transfer_row.ticker.clone(),
                     amt: transfer_row.amount.0,
@@ -282,7 +282,7 @@ pub async fn verify_drc20_transfers(
                     receiver_address: transfer_row.address.clone(), // Return to sender
                 }
             }
-            OrdinalInscriptionTransferDestination::Burnt(_) => VerifiedDrc20TransferData {
+            DoginalInscriptionTransferDestination::Burnt(_) => VerifiedDrc20TransferData {
                 tick: transfer_row.ticker.clone(),
                 amt: transfer_row.amount.0,
                 sender_address: transfer_row.address.clone(),
@@ -302,8 +302,8 @@ pub async fn verify_drc20_transfers(
 #[cfg(test)]
 mod test {
     use dogecoin::types::{
-        BlockIdentifier, DogecoinNetwork, OrdinalInscriptionRevealData,
-        OrdinalInscriptionTransferData, OrdinalInscriptionTransferDestination,
+        BlockIdentifier, DogecoinNetwork, DoginalInscriptionRevealData,
+        DoginalInscriptionTransferData, DoginalInscriptionTransferDestination,
         TransactionIdentifier,
     };
     use postgres::{pg_begin, pg_pool_client};
@@ -436,7 +436,7 @@ mod test {
     #[tokio::test]
     async fn test_drc20_verify_for_empty_db(
         op: ParsedDrc20Operation,
-        args: (OrdinalInscriptionRevealData, u64),
+        args: (DoginalInscriptionRevealData, u64),
     ) -> Result<Option<VerifiedDrc20Operation>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -527,7 +527,7 @@ mod test {
     #[tokio::test]
     async fn test_drc20_verify_for_existing_token(
         op: ParsedDrc20Operation,
-        reveal: OrdinalInscriptionRevealData,
+        reveal: DoginalInscriptionRevealData,
     ) -> Result<Option<VerifiedDrc20Operation>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -614,7 +614,7 @@ mod test {
     #[tokio::test]
     async fn test_drc20_verify_for_existing_self_mint_token(
         op: ParsedDrc20Operation,
-        reveal: OrdinalInscriptionRevealData,
+        reveal: DoginalInscriptionRevealData,
     ) -> Result<Option<VerifiedDrc20Operation>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -676,7 +676,7 @@ mod test {
     #[tokio::test]
     async fn test_drc20_verify_for_minted_out_token(
         op: ParsedDrc20Operation,
-        reveal: OrdinalInscriptionRevealData,
+        reveal: DoginalInscriptionRevealData,
     ) -> Result<Option<VerifiedDrc20Operation>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -756,7 +756,7 @@ mod test {
     #[tokio::test]
     async fn test_drc20_verify_for_almost_minted_out_token(
         op: ParsedDrc20Operation,
-        reveal: OrdinalInscriptionRevealData,
+        reveal: DoginalInscriptionRevealData,
     ) -> Result<Option<VerifiedDrc20Operation>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -897,7 +897,7 @@ mod test {
     #[tokio::test]
     async fn test_drc20_verify_for_token_with_mints(
         op: ParsedDrc20Operation,
-        reveal: OrdinalInscriptionRevealData,
+        reveal: DoginalInscriptionRevealData,
     ) -> Result<Option<VerifiedDrc20Operation>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -986,7 +986,7 @@ mod test {
     }
 
     #[test_case(
-        Drc20TransferBuilder::new().ordinal_number(5000).build()
+        Drc20TransferBuilder::new().doginal_number(5000).build()
         => Ok(Some(VerifiedDrc20TransferData {
             tick: "pepe".to_string(),
             amt: 500_000000000000000000,
@@ -997,8 +997,8 @@ mod test {
     )]
     #[test_case(
         Drc20TransferBuilder::new()
-            .ordinal_number(5000)
-            .destination(OrdinalInscriptionTransferDestination::SpentInFees)
+            .doginal_number(5000)
+            .destination(DoginalInscriptionTransferDestination::SpentInFees)
             .build()
         => Ok(Some(VerifiedDrc20TransferData {
             tick: "pepe".to_string(),
@@ -1010,8 +1010,8 @@ mod test {
     )]
     #[test_case(
         Drc20TransferBuilder::new()
-            .ordinal_number(5000)
-            .destination(OrdinalInscriptionTransferDestination::Burnt("test".to_string()))
+            .doginal_number(5000)
+            .destination(DoginalInscriptionTransferDestination::Burnt("test".to_string()))
             .build()
         => Ok(Some(VerifiedDrc20TransferData {
             tick: "pepe".to_string(),
@@ -1022,13 +1022,13 @@ mod test {
         "with transfer burnt"
     )]
     #[test_case(
-        Drc20TransferBuilder::new().ordinal_number(200).build()
+        Drc20TransferBuilder::new().doginal_number(200).build()
         => Ok(None);
         "with transfer non existent"
     )]
     #[tokio::test]
     async fn test_drc20_verify_transfer_for_token_with_mint_and_transfer(
-        transfer: OrdinalInscriptionTransferData,
+        transfer: DoginalInscriptionTransferData,
     ) -> Result<Option<VerifiedDrc20TransferData>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -1095,7 +1095,7 @@ mod test {
                 },
                 &Brc20RevealBuilder::new()
                     .inscription_number(2)
-                    .ordinal_number(5000)
+                    .doginal_number(5000)
                     .inscription_id(
                         "704b85a939c34ec9dbbf79c0ffc69ba09566d732dbf1af2c04de65b0697aa1f8i0",
                     )
@@ -1116,13 +1116,13 @@ mod test {
     }
 
     #[test_case(
-        Drc20TransferBuilder::new().ordinal_number(5000).build()
+        Drc20TransferBuilder::new().doginal_number(5000).build()
         => Ok(None);
         "with transfer already sent"
     )]
     #[tokio::test]
     async fn test_drc20_verify_transfer_for_token_with_mint_transfer_and_send(
-        transfer: OrdinalInscriptionTransferData,
+        transfer: DoginalInscriptionTransferData,
     ) -> Result<Option<VerifiedDrc20TransferData>, String> {
         let ctx = get_test_ctx();
         let mut pg_client = pg_test_connection().await;
@@ -1189,7 +1189,7 @@ mod test {
                 },
                 &Brc20RevealBuilder::new()
                     .inscription_number(2)
-                    .ordinal_number(5000)
+                    .doginal_number(5000)
                     .inscription_id(
                         "704b85a939c34ec9dbbf79c0ffc69ba09566d732dbf1af2c04de65b0697aa1f8i0",
                     )
@@ -1210,7 +1210,7 @@ mod test {
                                 "bc1pls75sfwullhygkmqap344f5cqf97qz95lvle6fvddm0tpz2l5ffslgq3m0"
                                     .to_string(),
                         },
-                        &Drc20TransferBuilder::new().ordinal_number(5000).build(),
+                        &Drc20TransferBuilder::new().doginal_number(5000).build(),
                         &block,
                         3,
                         &tx,

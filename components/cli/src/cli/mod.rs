@@ -315,7 +315,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                         );
 
                         let drc20_pool = config
-                            .ordinals_drc20_config()
+                            .doginals_drc20_config()
                             .map(|drc20| pg_pool(&drc20.db))
                             .transpose()
                             .map_err(|e| format!("Failed to create DRCC-20 pool: {}", e))?
@@ -734,7 +734,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                     return Err(format!("Lotto not found: {}", cmd.lotto_id));
                 };
                 let chain_tip =
-                    dogecoin::utils::bitcoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
+                    dogecoin::utils::dogecoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
                 if chain_tip.index > status.summary.cutoff_block {
                     return Err(format!(
                         "ticket sales closed for {} at block {} (current tip #{})",
@@ -841,7 +841,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 let config = Config::from_file_path(&cmd.config_path)?;
                 config.assert_doginals_config()?;
                 let chain_tip =
-                    dogecoin::utils::bitcoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
+                    dogecoin::utils::dogecoind::dogecoin_get_chain_tip(&config.dogecoin, ctx);
                 match doginals_indexer::lotto_status(&cmd.lotto_id, &config).await? {
                     Some(row) => {
                         let blocks_remaining =
@@ -1403,7 +1403,7 @@ async fn handle_command(opts: Protocol, ctx: &Context) -> Result<(), String> {
                 .map_err(|e| format!("Invalid txid '{}': {}", txid_str, e))?;
 
             let ctx_rpc = Context::empty();
-            let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, &ctx_rpc);
+            let rpc = dogecoin::utils::dogecoind::dogecoin_get_client(&config.dogecoin, &ctx_rpc);
             let raw_hex = rpc
                 .get_raw_transaction_hex(&txid, None)
                 .map_err(|e| format!("getrawtransaction {}: {}", txid_str, e))?;
@@ -1692,7 +1692,7 @@ fn broadcast_dogetag_send(
         return Err("message cannot be empty".into());
     }
 
-    let client = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, ctx);
+    let client = dogecoin::utils::dogecoind::dogecoin_get_client(&config.dogecoin, ctx);
     let recipient_script = parse_dogecoin_address(&cmd.to)?;
 
     let push_bytes: &bitcoin::script::PushBytes = msg_bytes.try_into().map_err(|_| {
@@ -1799,7 +1799,7 @@ fn broadcast_atomic_lotto_mint(
     payload: &str,
     ctx: &Context,
 ) -> Result<AtomicLottoMintResult, String> {
-    let client = dogecoin::utils::bitcoind::dogecoin_get_client(&config.dogecoin, ctx);
+    let client = dogecoin::utils::dogecoind::dogecoin_get_client(&config.dogecoin, ctx);
     let script_segments = build_lotto_inscription_segments(payload.as_bytes());
     // extra_amount = ticket_price_koinu * (tip_percent / 100)
     let extra_amount_koinu = ticket_price_koinu.saturating_mul(tip_percent as u64) / 100;

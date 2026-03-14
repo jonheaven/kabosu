@@ -1,9 +1,10 @@
+use crate::core::meta_protocols::dmp::{DmpListing, DmpBid, DmpSettle, DmpCancel};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use bitcoin::ScriptBuf;
 use deadpool_postgres::GenericClient;
 use dogecoin::types::{
-    BlockIdentifier, DogecoinBlockData, OrdinalInscriptionNumber, OrdinalOperation,
+    BlockIdentifier, DogecoinBlockData, DoginalInscriptionNumber, DoginalOperation,
     TransactionIdentifier,
 };
 use postgres::{
@@ -184,32 +185,32 @@ pub async fn get_reinscriptions_for_block<T: GenericClient>(
     inscriptions_data: &mut BTreeMap<(TransactionIdentifier, usize, u64), TraversalResult>,
     client: &T,
 ) -> Result<HashMap<u64, String>, String> {
-    let mut ordinal_numbers = vec![];
+    let mut doginal_numbers = vec![];
     for value in inscriptions_data.values() {
-        if value.ordinal_number != 0 {
-            ordinal_numbers.push(PgNumericU64(value.ordinal_number));
+        if value.doginal_number != 0 {
+            doginal_numbers.push(PgNumericU64(value.doginal_number));
         }
     }
-    let number_refs: Vec<&PgNumericU64> = ordinal_numbers.iter().collect();
+    let number_refs: Vec<&PgNumericU64> = doginal_numbers.iter().collect();
     let rows = client
         .query(
-            "SELECT ordinal_number, inscription_id
+            "SELECT doginal_number, inscription_id
             FROM inscriptions
-            WHERE ordinal_number = ANY ($1) AND classic_number >= 0",
+            WHERE doginal_number = ANY ($1) AND classic_number >= 0",
             &[&number_refs],
         )
         .await
         .map_err(|e| format!("get_reinscriptions_for_block: {e}"))?;
     let mut results = HashMap::new();
     for row in rows.iter() {
-        let ordinal_number: PgNumericU64 = row.get("ordinal_number");
+        let doginal_number: PgNumericU64 = row.get("doginal_number");
         let inscription_id: String = row.get("inscription_id");
-        results.insert(ordinal_number.0, inscription_id);
+        results.insert(doginal_number.0, inscription_id);
     }
     Ok(results)
 }
 
-pub async fn has_ordinal_activity_at_block<T: GenericClient>(
+pub async fn has_doginal_activity_at_block<T: GenericClient>(
     client: &T,
     block_height: u64,
 ) -> Result<bool, String> {
@@ -219,7 +220,7 @@ pub async fn has_ordinal_activity_at_block<T: GenericClient>(
             &[&PgNumericU64(block_height)],
         )
         .await
-        .map_err(|e| format!("has_ordinal_activity_at_block: {e}"))?;
+        .map_err(|e| format!("has_doginal_activity_at_block: {e}"))?;
     Ok(row.is_some())
 }
 
@@ -229,7 +230,7 @@ pub async fn get_inscriptions_at_block<T: GenericClient>(
 ) -> Result<BTreeMap<String, TraversalResult>, String> {
     let rows = client
         .query(
-            "SELECT number, classic_number, ordinal_number, inscription_id, input_index, tx_id
+            "SELECT number, classic_number, doginal_number, inscription_id, input_index, tx_id
             FROM inscriptions
             WHERE block_height = $1",
             &[&PgNumericU64(block_height)],
@@ -238,17 +239,17 @@ pub async fn get_inscriptions_at_block<T: GenericClient>(
         .map_err(|e| format!("get_inscriptions_at_block: {e}"))?;
     let mut results = BTreeMap::new();
     for row in rows.iter() {
-        let inscription_number = OrdinalInscriptionNumber {
+        let inscription_number = DoginalInscriptionNumber {
             classic: row.get("classic_number"),
             jubilee: row.get("number"),
         };
-        let ordinal_number: PgNumericU64 = row.get("ordinal_number");
+        let doginal_number: PgNumericU64 = row.get("doginal_number");
         let inscription_id: String = row.get("inscription_id");
         let inscription_input_index: PgBigIntU32 = row.get("input_index");
         let tx_id: String = row.get("tx_id");
         let traversal = TraversalResult {
             inscription_number,
-            ordinal_number: ordinal_number.0,
+            doginal_number: doginal_number.0,
             inscription_input_index: inscription_input_index.0 as usize,
             transfers: 0,
             transaction_identifier_inscription: TransactionIdentifier { hash: tx_id },
@@ -280,7 +281,7 @@ pub async fn get_inscribed_satpoints_at_tx_inputs<T: GenericClient>(
             .query(
                 &format!(
                     "WITH inputs (vin, output) AS (VALUES {})
-                    SELECT i.vin, l.ordinal_number, l.\"offset\"
+                    SELECT i.vin, l.doginal_number, l.\"offset\"
                     FROM current_locations AS l
                     INNER JOIN inputs AS i ON i.output = l.output",
                     utils::multi_row_query_param_str(chunk.len(), 2)
@@ -292,11 +293,11 @@ pub async fn get_inscribed_satpoints_at_tx_inputs<T: GenericClient>(
         for row in rows.iter() {
             let vin: String = row.get("vin");
             let vin_key = vin.parse::<usize>().unwrap();
-            let ordinal_number: PgNumericU64 = row.get("ordinal_number");
+            let doginal_number: PgNumericU64 = row.get("doginal_number");
             let offset: PgNumericU64 = row.get("offset");
             let entry = results.entry(vin_key).or_insert(vec![]);
             entry.push(WatchedSatpoint {
-                ordinal_number: ordinal_number.0,
+                doginal_number: doginal_number.0,
                 offset: offset.0,
             });
         }
@@ -315,7 +316,7 @@ async fn insert_inscriptions<T: GenericClient>(
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
         for row in chunk.iter() {
             params.push(&row.inscription_id);
-            params.push(&row.ordinal_number);
+            params.push(&row.doginal_number);
             params.push(&row.number);
             params.push(&row.classic_number);
             params.push(&row.block_height);
@@ -342,7 +343,7 @@ async fn insert_inscriptions<T: GenericClient>(
         client
             .query(
                 &format!("INSERT INTO inscriptions
-                    (inscription_id, ordinal_number, number, classic_number, block_height, block_hash, tx_id, tx_index, address,
+                    (inscription_id, doginal_number, number, classic_number, block_height, block_hash, tx_id, tx_index, address,
                     mime_type, content_type, content_length, content, fee, curse_type, recursive, input_index, pointer, metadata,
                     metaprotocol, delegate, timestamp, dogespells, unbound_sequence)
                     VALUES {}
@@ -425,7 +426,7 @@ async fn insert_locations<T: GenericClient>(
     for chunk in locations.chunks(500) {
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
         for row in chunk.iter() {
-            params.push(&row.ordinal_number);
+            params.push(&row.doginal_number);
             params.push(&row.block_height);
             params.push(&row.tx_index);
             params.push(&row.tx_id);
@@ -445,11 +446,11 @@ async fn insert_locations<T: GenericClient>(
             .query(
                 &format!(
                     "WITH location_inserts AS (
-                        INSERT INTO locations (ordinal_number, block_height, tx_index, tx_id, block_hash, address, output,
+                        INSERT INTO locations (doginal_number, block_height, tx_index, tx_id, block_hash, address, output,
                             \"offset\", prev_output, prev_offset, value, transfer_type, timestamp)
                         VALUES {}
-                        ON CONFLICT (ordinal_number, block_height, tx_index) DO NOTHING
-                        RETURNING ordinal_number, block_height, block_hash, tx_index
+                        ON CONFLICT (doginal_number, block_height, tx_index) DO NOTHING
+                        RETURNING doginal_number, block_height, block_hash, tx_index
                     ),
                     prev_transfer_index AS (
                         SELECT MAX(block_transfer_index) AS max
@@ -457,12 +458,12 @@ async fn insert_locations<T: GenericClient>(
                         WHERE block_height = (SELECT block_height FROM location_inserts LIMIT 1)
                     ),
                     moved_inscriptions AS (
-                        SELECT i.inscription_id, i.number, i.ordinal_number, li.block_height, li.tx_index,
+                        SELECT i.inscription_id, i.number, i.doginal_number, li.block_height, li.tx_index,
                             COALESCE(
                                 (
                                     SELECT l.block_height || ',' || l.tx_index
                                     FROM locations AS l
-                                    WHERE l.ordinal_number = li.ordinal_number AND (
+                                    WHERE l.doginal_number = li.doginal_number AND (
                                         l.block_height < li.block_height OR
                                         (l.block_height = li.block_height AND l.tx_index < li.tx_index)
                                     )
@@ -472,7 +473,7 @@ async fn insert_locations<T: GenericClient>(
                                 (
                                     SELECT l.block_height || ',' || l.tx_index
                                     FROM location_inserts AS l
-                                    WHERE l.ordinal_number = li.ordinal_number AND (
+                                    WHERE l.doginal_number = li.doginal_number AND (
                                         l.block_height < li.block_height OR
                                         (l.block_height = li.block_height AND l.tx_index < li.tx_index)
                                     )
@@ -482,13 +483,13 @@ async fn insert_locations<T: GenericClient>(
                             ) AS from_data,
                             (ROW_NUMBER() OVER (ORDER BY li.block_height ASC, li.tx_index ASC) + (SELECT COALESCE(max, -1) FROM prev_transfer_index)) AS block_transfer_index
                         FROM inscriptions AS i
-                        INNER JOIN location_inserts AS li ON li.ordinal_number = i.ordinal_number
+                        INNER JOIN location_inserts AS li ON li.doginal_number = i.doginal_number
                         WHERE i.block_height < li.block_height OR (i.block_height = li.block_height AND i.tx_index < li.tx_index)
                     )
                     INSERT INTO inscription_transfers
-                        (inscription_id, number, ordinal_number, block_height, tx_index, from_block_height, from_tx_index, block_transfer_index)
+                        (inscription_id, number, doginal_number, block_height, tx_index, from_block_height, from_tx_index, block_transfer_index)
                         (
-                            SELECT inscription_id, number, ordinal_number, block_height, tx_index,
+                            SELECT inscription_id, number, doginal_number, block_height, tx_index,
                                 SPLIT_PART(from_data, ',', 1)::numeric AS from_block_height,
                                 SPLIT_PART(from_data, ',', 2)::bigint AS from_tx_index,
                                 block_transfer_index
@@ -512,7 +513,7 @@ async fn insert_koinus<T: GenericClient>(satoshis: &[DbKoinu], client: &T) -> Re
     for chunk in satoshis.chunks(500) {
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
         for row in chunk.iter() {
-            params.push(&row.ordinal_number);
+            params.push(&row.doginal_number);
             params.push(&row.rarity);
             params.push(&row.coinbase_height);
         }
@@ -520,9 +521,9 @@ async fn insert_koinus<T: GenericClient>(satoshis: &[DbKoinu], client: &T) -> Re
             .query(
                 &format!(
                     "INSERT INTO satoshis
-                    (ordinal_number, rarity, coinbase_height)
+                    (doginal_number, rarity, coinbase_height)
                     VALUES {}
-                    ON CONFLICT (ordinal_number) DO NOTHING",
+                    ON CONFLICT (doginal_number) DO NOTHING",
                     utils::multi_row_query_param_str(chunk.len(), 3)
                 ),
                 &params,
@@ -547,7 +548,7 @@ async fn insert_current_locations<T: GenericClient>(
                 "WITH prev_owners AS (
                     SELECT address, COUNT(*) AS count
                     FROM current_locations
-                    WHERE ordinal_number = ANY ($1)
+                    WHERE doginal_number = ANY ($1)
                     GROUP BY address
                 )
                 UPDATE counts_by_address
@@ -566,7 +567,7 @@ async fn insert_current_locations<T: GenericClient>(
     for chunk in new_locations.chunks(500) {
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
         for row in chunk.iter() {
-            params.push(&row.ordinal_number);
+            params.push(&row.doginal_number);
             params.push(&row.block_height);
             params.push(&row.tx_id);
             params.push(&row.tx_index);
@@ -577,9 +578,9 @@ async fn insert_current_locations<T: GenericClient>(
         client
             .query(
                 &format!(
-                    "INSERT INTO current_locations (ordinal_number, block_height, tx_id, tx_index, address, output, \"offset\")
+                    "INSERT INTO current_locations (doginal_number, block_height, tx_id, tx_index, address, output, \"offset\")
                     VALUES {}
-                    ON CONFLICT (ordinal_number) DO UPDATE SET
+                    ON CONFLICT (doginal_number) DO UPDATE SET
                         block_height = EXCLUDED.block_height,
                         tx_id = EXCLUDED.tx_id,
                         tx_index = EXCLUDED.tx_index,
@@ -605,7 +606,7 @@ async fn insert_current_locations<T: GenericClient>(
                 "WITH new_owners AS (
                     SELECT address, COUNT(*) AS count
                     FROM current_locations
-                    WHERE ordinal_number = ANY ($1) AND address IS NOT NULL
+                    WHERE doginal_number = ANY ($1) AND address IS NOT NULL
                     GROUP BY address
                 )
                 INSERT INTO counts_by_address (address, count)
@@ -794,7 +795,7 @@ pub async fn update_chain_tip<T: GenericClient>(
     Ok(())
 }
 
-/// Inserts an indexed ordinals block into the DB.
+/// Inserts an indexed doginals block into the DB.
 pub async fn insert_block<T: GenericClient>(
     block: &DogecoinBlockData,
     client: &T,
@@ -812,25 +813,25 @@ pub async fn insert_block<T: GenericClient>(
     let mut recursive_counts = HashMap::new();
 
     let mut update_current_location =
-        |ordinal_number: PgNumericU64, new_location: DbCurrentLocation| match current_locations
-            .get(&ordinal_number)
+        |doginal_number: PgNumericU64, new_location: DbCurrentLocation| match current_locations
+            .get(&doginal_number)
         {
             Some(current_location) => {
                 if new_location.block_height > current_location.block_height
                     || (new_location.block_height == current_location.block_height
                         && new_location.tx_index > current_location.tx_index)
                 {
-                    current_locations.insert(ordinal_number, new_location);
+                    current_locations.insert(doginal_number, new_location);
                 }
             }
             None => {
-                current_locations.insert(ordinal_number, new_location);
+                current_locations.insert(doginal_number, new_location);
             }
         };
     for (tx_index, tx) in block.transactions.iter().enumerate() {
-        for operation in tx.metadata.ordinal_operations.iter() {
+        for operation in tx.metadata.doginal_operations.iter() {
             match operation {
-                OrdinalOperation::InscriptionRevealed(reveal) => {
+                DoginalOperation::InscriptionRevealed(reveal) => {
                     let mut inscription = DbInscription::from_reveal(
                         reveal,
                         &block.block_identifier,
@@ -859,7 +860,7 @@ pub async fn insert_block<T: GenericClient>(
                     let rarity = satoshi.rarity.clone();
                     satoshis.push(satoshi);
                     update_current_location(
-                        PgNumericU64(reveal.ordinal_number),
+                        PgNumericU64(reveal.doginal_number),
                         DbCurrentLocation::from_reveal(
                             reveal,
                             &block.block_identifier,
@@ -895,7 +896,7 @@ pub async fn insert_block<T: GenericClient>(
                         .and_modify(|c| *c += 1)
                         .or_insert(1);
                 }
-                OrdinalOperation::InscriptionTransferred(transfer) => {
+                DoginalOperation::InscriptionTransferred(transfer) => {
                     locations.push(DbLocation::from_transfer(
                         transfer,
                         &block.block_identifier,
@@ -904,7 +905,7 @@ pub async fn insert_block<T: GenericClient>(
                         block.timestamp,
                     ));
                     update_current_location(
-                        PgNumericU64(transfer.ordinal_number),
+                        PgNumericU64(transfer.doginal_number),
                         DbCurrentLocation::from_transfer(
                             transfer,
                             &block.block_identifier,
@@ -948,7 +949,7 @@ pub async fn rollback_block<T: GenericClient>(block_height: u64, client: &T) -> 
     let moved_sat_rows = client
         .query(
             "WITH affected_sats AS (
-                SELECT ordinal_number FROM locations WHERE block_height = $1
+                SELECT doginal_number FROM locations WHERE block_height = $1
             ),
             affected_owners AS (
                 SELECT address, COUNT(*) AS count FROM locations WHERE block_height = $1 GROUP BY address
@@ -962,14 +963,14 @@ pub async fn rollback_block<T: GenericClient>(block_height: u64, client: &T) -> 
                 WHERE EXISTS (SELECT 1 FROM affected_owners WHERE affected_owners.address = counts_by_address.address)
             ),
             satoshi_deletes AS (
-                DELETE FROM satoshis WHERE ordinal_number IN (
-                    SELECT ordinal_number FROM affected_sats WHERE NOT EXISTS
+                DELETE FROM satoshis WHERE doginal_number IN (
+                    SELECT doginal_number FROM affected_sats WHERE NOT EXISTS
                     (
                         SELECT 1 FROM inscriptions AS i
-                        WHERE i.ordinal_number = affected_sats.ordinal_number AND i.block_height < $1
+                        WHERE i.doginal_number = affected_sats.doginal_number AND i.block_height < $1
                     )
                 )
-                RETURNING ordinal_number, rarity
+                RETURNING doginal_number, rarity
             ),
             deleted_satoshi_rarity AS (
                 SELECT rarity, COUNT(*) FROM satoshi_deletes GROUP BY rarity
@@ -983,9 +984,9 @@ pub async fn rollback_block<T: GenericClient>(block_height: u64, client: &T) -> 
                 WHERE EXISTS (SELECT 1 FROM deleted_satoshi_rarity WHERE deleted_satoshi_rarity.rarity = counts_by_sat_rarity.rarity)
             ),
             current_location_deletes AS (
-                DELETE FROM current_locations WHERE ordinal_number IN (SELECT ordinal_number FROM affected_sats)
+                DELETE FROM current_locations WHERE doginal_number IN (SELECT doginal_number FROM affected_sats)
             )
-            SELECT ordinal_number FROM affected_sats",
+            SELECT doginal_number FROM affected_sats",
             &[&PgNumericU64(block_height)],
         )
         .await
@@ -1048,16 +1049,16 @@ pub async fn rollback_block<T: GenericClient>(block_height: u64, client: &T) -> 
     // Re-compute current location and owners
     let moved_sats: Vec<PgNumericU64> = moved_sat_rows
         .iter()
-        .map(|r| r.get("ordinal_number"))
+        .map(|r| r.get("doginal_number"))
         .collect();
     client
         .execute(
-            "INSERT INTO current_locations (ordinal_number, block_height, tx_id, tx_index, address, output, \"offset\")
+            "INSERT INTO current_locations (doginal_number, block_height, tx_id, tx_index, address, output, \"offset\")
             (
-                SELECT DISTINCT ON(ordinal_number) ordinal_number, block_height, tx_id, tx_index, address, output, \"offset\"
+                SELECT DISTINCT ON(doginal_number) doginal_number, block_height, tx_id, tx_index, address, output, \"offset\"
                 FROM locations
-                WHERE ordinal_number = ANY ($1)
-                ORDER BY ordinal_number, block_height DESC, tx_index DESC
+                WHERE doginal_number = ANY ($1)
+                ORDER BY doginal_number, block_height DESC, tx_index DESC
             )",
             &[&moved_sats]
         )
@@ -1068,7 +1069,7 @@ pub async fn rollback_block<T: GenericClient>(block_height: u64, client: &T) -> 
             "WITH new_owners AS (
                 SELECT address, COUNT(*) AS count
                 FROM current_locations
-                WHERE ordinal_number = ANY ($1)
+                WHERE doginal_number = ANY ($1)
                 GROUP BY address
             )
             INSERT INTO counts_by_address (address, count)
@@ -2249,6 +2250,16 @@ pub fn resolve_lottery_winners(
                 .collect();
             (winner_rows, false)
         }
+        ResolutionMode::ClosestWins => {
+            resolve_closest_fingerprint_impl(
+                lottery,
+                tickets,
+                resolved_height,
+                net_prize_koinu,
+                draw,
+                block_hash,
+            )
+        }
         ResolutionMode::ClosestFingerprint => resolve_closest_fingerprint_impl(
             lottery,
             tickets,
@@ -2257,6 +2268,7 @@ pub fn resolve_lottery_winners(
             draw,
             block_hash,
         ),
+        _ => todo!("ResolutionMode arm not implemented: {:?}", lottery.resolution_mode),
     }
 }
 
@@ -3298,50 +3310,55 @@ async fn rebuild_dogespells_nft<T: GenericClient>(
 // DMP
 // ---------------------------------------------------------------------------
 
-use crate::core::{meta_protocols::dmp::DmpOperation, protocol::inscription_parsing::ParsedDmpOp};
+use crate::core::protocol::inscription_parsing::ParsedDmpOp;
 
 /// Insert all DMP operations from a block into the appropriate tables.
 pub async fn insert_dmp_ops<T: GenericClient>(
     ops: &[ParsedDmpOp],
     client: &T,
 ) -> Result<(), String> {
-    let mut listings = Vec::new();
-    let mut bids = Vec::new();
-    let mut settlements = Vec::new();
-    let mut cancels = Vec::new();
+    let mut listings: Vec<(DmpListing, ParsedDmpOp)> = Vec::new();
+    let mut bids: Vec<(DmpBid, ParsedDmpOp)> = Vec::new();
+    let mut settlements: Vec<(DmpSettle, ParsedDmpOp)> = Vec::new();
+    let mut cancels: Vec<(DmpCancel, ParsedDmpOp)> = Vec::new();
 
-    for parsed in ops {
-        match &parsed.op {
-            DmpOperation::Listing(l) => listings.push((l, parsed)),
-            DmpOperation::Bid(b) => bids.push((b, parsed)),
-            DmpOperation::Settle(s) => settlements.push((s, parsed)),
-            DmpOperation::Cancel(c) => cancels.push((c, parsed)),
-        }
+    for _parsed in ops {
+        // ...existing code...
     }
 
     for chunk in listings.chunks(500) {
+        // Pre-collect all string conversions for the chunk to avoid lifetime issues
+        let chunk_strings: Vec<(String, String, String, String, String)> = chunk
+            .iter()
+            .map(|(l, parsed)| {
+                let price_koinu_str = l.price_koinu.to_string();
+                let expiry_height_str = l.expiry_height.to_string();
+                let nonce_str = l.nonce.to_string();
+                let block_height_str = parsed.block_height.to_string();
+                let block_timestamp_str = parsed.block_timestamp.to_string();
+                (price_koinu_str, expiry_height_str, nonce_str, block_height_str, block_timestamp_str)
+            })
+            .collect();
+
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (l, parsed) in chunk {
-            let price_koinu_i64 = l.price_koinu as i64;
-            let price_koinu_str = price_koinu_i64.to_string();
-            let expiry_height_i64 = l.expiry_height as i64;
-            let expiry_height_str = expiry_height_i64.to_string();
-            let nonce_i64 = l.nonce as i64;
-            let nonce_str = nonce_i64.to_string();
-            let block_height_i64 = parsed.block_height as i64;
-            let block_timestamp_i64 = parsed.block_timestamp as i64;
-            let block_timestamp_str = block_timestamp_i64.to_string();
-            let values = [
+        for (i, (l, parsed)) in chunk.iter().enumerate() {
+            let (ref price_koinu_str, ref expiry_height_str, ref nonce_str, ref block_height_str, ref block_timestamp_str) = chunk_strings[i];
+            let price_koinu_str_ref = &price_koinu_str[..];
+            let expiry_height_str_ref = &expiry_height_str[..];
+            let nonce_str_ref = &nonce_str[..];
+            let block_height_str_ref = &block_height_str[..];
+            let block_timestamp_str_ref = &block_timestamp_str[..];
+            let values: Vec<&(dyn ToSql + Sync)> = vec![
                 &l.inscription_id,
                 &l.inscription_id,
                 &l.seller,
-                &price_koinu_str,
+                &price_koinu_str_ref,
                 &l.psbt_cid,
-                &expiry_height_str,
-                &nonce_str,
+                &expiry_height_str_ref,
+                &nonce_str_ref,
                 &l.signature,
-                &(block_height_i64.to_string()),
-                &block_timestamp_str,
+                &block_height_str_ref,
+                &block_timestamp_str_ref,
             ];
             params.extend_from_slice(&values);
         }
@@ -3362,28 +3379,38 @@ pub async fn insert_dmp_ops<T: GenericClient>(
     }
 
     for chunk in bids.chunks(500) {
+        // Pre-collect all string conversions for the chunk to avoid lifetime issues
+        let chunk_strings: Vec<(String, String, String, String, String)> = chunk
+            .iter()
+            .map(|(b, parsed)| {
+                let price_koinu_str = b.price_koinu.to_string();
+                let expiry_height_str = b.expiry_height.to_string();
+                let nonce_str = b.nonce.to_string();
+                let block_height_str = parsed.block_height.to_string();
+                let block_timestamp_str = parsed.block_timestamp.to_string();
+                (price_koinu_str, expiry_height_str, nonce_str, block_height_str, block_timestamp_str)
+            })
+            .collect();
+
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (b, parsed) in chunk {
-            let price_koinu_i64 = b.price_koinu as i64;
-            let price_koinu_str = price_koinu_i64.to_string();
-            let expiry_height_i64 = b.expiry_height as i64;
-            let expiry_height_str = expiry_height_i64.to_string();
-            let nonce_i64 = b.nonce as i64;
-            let nonce_str = nonce_i64.to_string();
-            let block_height_i64 = parsed.block_height as i64;
-            let block_timestamp_i64 = parsed.block_timestamp as i64;
-            let block_timestamp_str = block_timestamp_i64.to_string();
-            let values = [
+        for (i, (b, parsed)) in chunk.iter().enumerate() {
+            let (ref price_koinu_str, ref expiry_height_str, ref nonce_str, ref block_height_str, ref block_timestamp_str) = chunk_strings[i];
+            let price_koinu_str_ref = price_koinu_str.as_str();
+            let expiry_height_str_ref = expiry_height_str.as_str();
+            let nonce_str_ref = nonce_str.as_str();
+            let block_height_str_ref = block_height_str.as_str();
+            let block_timestamp_str_ref = block_timestamp_str.as_str();
+            let values: Vec<&(dyn ToSql + Sync)> = vec![
                 &b.inscription_id,
                 &b.listing_id,
                 &b.bidder,
-                &price_koinu_str,
+                price_koinu_str_ref,
                 &b.psbt_cid,
-                &expiry_height_str,
-                &nonce_str,
+                expiry_height_str_ref,
+                nonce_str_ref,
                 &b.signature,
-                &(block_height_i64.to_string()),
-                &block_timestamp_str,
+                block_height_str_ref,
+                block_timestamp_str_ref,
             ];
             params.extend_from_slice(&values);
         }
@@ -3422,26 +3449,38 @@ pub async fn insert_dmp_ops<T: GenericClient>(
         }
     }
     for chunk in settlements.chunks(500) {
+        // Pre-collect all string conversions for the chunk to avoid lifetime issues
+        let chunk_strings: Vec<(Box<String>, Box<String>, Box<String>, Option<Box<String>>, Box<String>, Box<String>)> = chunk
+            .iter()
+            .map(|(s, parsed)| {
+                let nonce_str = Box::new(s.nonce.to_string());
+                let block_height_str = Box::new(parsed.block_height.to_string());
+                let block_timestamp_str = Box::new(parsed.block_timestamp.to_string());
+                let bid_id_str = s.bid_id.clone().map(Box::new);
+                (nonce_str, block_height_str, block_timestamp_str, bid_id_str, block_height_str.clone(), block_timestamp_str.clone())
+            })
+            .collect();
+
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (s, parsed) in chunk {
-            let nonce_i64 = s.nonce as i64;
-            let nonce_str = nonce_i64.to_string();
-            let block_height_i64 = parsed.block_height as i64;
-            let block_height_str = block_height_i64.to_string();
-            let block_timestamp_i64 = parsed.block_timestamp as i64;
-            let values = [
+        for (i, (s, parsed)) in chunk.iter().enumerate() {
+            let (ref nonce_str, ref block_height_str, ref block_timestamp_str, ref bid_id_str, _, _) = chunk_strings[i];
+            let nonce_str_ref = nonce_str.as_str();
+            let block_height_str_ref = block_height_str.as_str();
+            let block_timestamp_str_ref = block_timestamp_str.as_str();
+            let bid_id_str_ref = match bid_id_str {
+                Some(ref bid) => bid.as_str(),
+                None => "",
+            };
+            let values: Vec<&(dyn ToSql + Sync)> = vec![
                 &s.inscription_id,
                 &s.listing_id,
-                match &s.bid_id {
-                    Some(bid) => bid,
-                    None => "",
-                },
+                &bid_id_str_ref,
                 &s.settler,
                 &s.psbt_cid,
-                &nonce_str,
+                nonce_str_ref,
                 &s.signature,
-                &block_height_str,
-                &(block_timestamp_i64.to_string()),
+                block_height_str_ref,
+                block_timestamp_str_ref,
             ];
             params.extend_from_slice(&values);
         }
@@ -3471,21 +3510,31 @@ pub async fn insert_dmp_ops<T: GenericClient>(
             .map_err(|e| format!("insert_dmp_ops (cancel update listing): {e}"))?;
     }
     for chunk in cancels.chunks(500) {
+        // Pre-collect all string conversions for the chunk to avoid lifetime issues
+        let chunk_strings: Vec<(String, String, String)> = chunk
+            .iter()
+            .map(|(c, parsed)| {
+                let nonce_str = c.nonce.to_string();
+                let block_height_str = parsed.block_height.to_string();
+                let block_timestamp_str = parsed.block_timestamp.to_string();
+                (nonce_str, block_height_str, block_timestamp_str)
+            })
+            .collect();
+
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (c, parsed) in chunk {
-            let nonce_i64 = c.nonce as i64;
-            let nonce_str = nonce_i64.to_string();
-            let block_height_i64 = parsed.block_height as i64;
-            let block_height_str = block_height_i64.to_string();
-            let block_timestamp_i64 = parsed.block_timestamp as i64;
-            let values = [
+        for (i, (c, parsed)) in chunk.iter().enumerate() {
+            let (ref nonce_str, ref block_height_str, ref block_timestamp_str) = chunk_strings[i];
+            let nonce_str_ref = nonce_str.as_str();
+            let block_height_str_ref = block_height_str.as_str();
+            let block_timestamp_str_ref = block_timestamp_str.as_str();
+            let values: Vec<&(dyn ToSql + Sync)> = vec![
                 &c.inscription_id,
                 &c.listing_id,
                 &c.canceller,
-                &nonce_str,
+                nonce_str_ref,
                 &c.signature,
-                &block_height_str,
-                &(block_timestamp_i64.to_string()),
+                block_height_str_ref,
+                block_timestamp_str_ref,
             ];
             params.extend_from_slice(&values);
         }
@@ -3495,8 +3544,7 @@ pub async fn insert_dmp_ops<T: GenericClient>(
                     "INSERT INTO dmp_cancels
                 (cancel_id, listing_id, canceller, nonce, signature,
                  block_height, block_timestamp)
-             VALUES {}
-             ON CONFLICT (cancel_id) DO NOTHING",
+             VALUES {}\n             ON CONFLICT (cancel_id) DO NOTHING",
                     utils::multi_row_query_param_str(chunk.len(), 7)
                 ),
                 &params,
@@ -3632,8 +3680,8 @@ pub async fn list_dmp_listings<T: GenericClient>(
 mod test {
     use deadpool_postgres::GenericClient;
     use dogecoin::types::{
-        OrdinalInscriptionNumber, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
-        OrdinalInscriptionTransferDestination, OrdinalOperation,
+        DoginalInscriptionNumber, DoginalInscriptionRevealData, DoginalInscriptionTransferData,
+        DoginalInscriptionTransferDestination, DoginalOperation,
     };
     use postgres::{
         pg_begin, pg_pool_client,
@@ -3654,24 +3702,24 @@ mod test {
     };
 
     async fn get_current_location<T: GenericClient>(
-        ordinal_number: u64,
+        doginal_number: u64,
         client: &T,
     ) -> Option<DbCurrentLocation> {
         let row = client
             .query_opt(
-                "SELECT * FROM current_locations WHERE ordinal_number = $1",
-                &[&PgNumericU64(ordinal_number)],
+                "SELECT * FROM current_locations WHERE doginal_number = $1",
+                &[&PgNumericU64(doginal_number)],
             )
             .await
             .unwrap();
         row.map(|r| DbCurrentLocation::from_pg_row(&r))
     }
 
-    async fn get_locations<T: GenericClient>(ordinal_number: u64, client: &T) -> Vec<DbLocation> {
+    async fn get_locations<T: GenericClient>(doginal_number: u64, client: &T) -> Vec<DbLocation> {
         let row = client
             .query(
-                "SELECT * FROM locations WHERE ordinal_number = $1",
-                &[&PgNumericU64(ordinal_number)],
+                "SELECT * FROM locations WHERE doginal_number = $1",
+                &[&PgNumericU64(doginal_number)],
             )
             .await
             .unwrap();
@@ -3692,11 +3740,11 @@ mod test {
         row.map(|r| DbInscription::from_pg_row(&r))
     }
 
-    async fn get_satoshi<T: GenericClient>(ordinal_number: u64, client: &T) -> Option<DbKoinu> {
+    async fn get_satoshi<T: GenericClient>(doginal_number: u64, client: &T) -> Option<DbKoinu> {
         let row = client
             .query_opt(
-                "SELECT * FROM satoshis WHERE ordinal_number = $1",
-                &[&PgNumericU64(ordinal_number)],
+                "SELECT * FROM satoshis WHERE doginal_number = $1",
+                &[&PgNumericU64(doginal_number)],
             )
             .await
             .unwrap();
@@ -3806,13 +3854,13 @@ mod test {
                     .hash("0x000000000000000000024d4c784521e54b6f4a5945376ae6e248cee1ed2c0627".to_string())
                     .add_transaction(
                         TestTransactionBuilder::new()
-                            .hash("0xb61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d6357355".to_string())
-                            .add_ordinal_operation(OrdinalOperation::InscriptionRevealed(
-                                OrdinalInscriptionRevealData {
+                            .hash("0xb61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735i0".to_string())
+                            .add_doginal_operation(DoginalOperation::InscriptionRevealed(
+                                DoginalInscriptionRevealData {
                                     content_bytes: "0x7b200a20202270223a20226272632d3230222c0a2020226f70223a20226465706c6f79222c0a2020227469636b223a20226f726469222c0a2020226d6178223a20223231303030303030222c0a2020226c696d223a202231303030220a7d".to_string(),
                                     content_type: "text/plain;charset=utf-8".to_string(),
                                     content_length: 94,
-                                    inscription_number: OrdinalInscriptionNumber { classic: 0, jubilee: 0 },
+                                    inscription_number: DoginalInscriptionNumber { classic: 0, jubilee: 0 },
                                     inscription_fee: 0,
                                     inscription_output_value: 10000,
                                     inscription_id: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735i0".to_string(),
@@ -3823,9 +3871,9 @@ mod test {
                                     metaprotocol: None,
                                     metadata: None,
                                     parents: vec![],
-                                    ordinal_number: 7000,
-                                    ordinal_block_height: 0,
-                                    ordinal_offset: 0,
+                                    doginal_number: 7000,
+                                    doginal_block_height: 0,
+                                    doginal_offset: 0,
                                     tx_index: 0,
                                     transfers_pre_inscription: 0,
                                     koinupoint_post_inscription: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735:0:0".to_string(),
@@ -3849,7 +3897,7 @@ mod test {
                 assert_eq!(1, locations.len());
                 assert_eq!(
                     Some(&DbLocation {
-                        ordinal_number: PgNumericU64(7000),
+                        doginal_number: PgNumericU64(7000),
                         block_height: PgNumericU64(800000),
                         tx_id: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735"
                             .to_string(),
@@ -3872,7 +3920,7 @@ mod test {
                 );
                 assert_eq!(
                     Some(DbCurrentLocation {
-                        ordinal_number: PgNumericU64(7000),
+                        doginal_number: PgNumericU64(7000),
                         block_height: PgNumericU64(800000),
                         tx_id: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735"
                             .to_string(),
@@ -3887,7 +3935,7 @@ mod test {
                 );
                 assert_eq!(
                     Some(DbKoinu {
-                        ordinal_number: PgNumericU64(7000),
+                        doginal_number: PgNumericU64(7000),
                         rarity: "common".to_string(),
                         coinbase_height: PgNumericU64(0)
                     }),
@@ -3916,10 +3964,10 @@ mod test {
                     .add_transaction(
                         TestTransactionBuilder::new()
                             .hash("0x4862db07b588ebfd8627371045d6d17a99a66a01759782d7dd3009f68adb860f".to_string())
-                            .add_ordinal_operation(OrdinalOperation::InscriptionTransferred(
-                                OrdinalInscriptionTransferData {
-                                    ordinal_number: 7000,
-                                    destination: OrdinalInscriptionTransferDestination::Transferred("3DnzPvLPH1jA9EqQzq3Fgo9BMDya4eG1ay".to_string()),
+                            .add_doginal_operation(DoginalOperation::InscriptionTransferred(
+                                DoginalInscriptionTransferData {
+                                    doginal_number: 7000,
+                                    destination: DoginalInscriptionTransferDestination::Transferred("3DnzPvLPH1jA9EqQzq3Fgo9BMDya4eG1ay".to_string()),
                                     koinupoint_pre_transfer: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735:0:0".to_string(),
                                     koinupoint_post_transfer: "4862db07b588ebfd8627371045d6d17a99a66a01759782d7dd3009f68adb860f:0:0".to_string(),
                                     post_transfer_output_value: Some(8000),
@@ -3935,7 +3983,7 @@ mod test {
                 assert_eq!(2, locations.len());
                 assert_eq!(
                     Some(&DbLocation {
-                        ordinal_number: PgNumericU64(7000),
+                        doginal_number: PgNumericU64(7000),
                         block_height: PgNumericU64(800001),
                         tx_id: "4862db07b588ebfd8627371045d6d17a99a66a01759782d7dd3009f68adb860f"
                             .to_string(),
@@ -3961,7 +4009,7 @@ mod test {
                 );
                 assert_eq!(
                     Some(DbCurrentLocation {
-                        ordinal_number: PgNumericU64(7000),
+                        doginal_number: PgNumericU64(7000),
                         block_height: PgNumericU64(800001),
                         tx_id: "4862db07b588ebfd8627371045d6d17a99a66a01759782d7dd3009f68adb860f"
                             .to_string(),
@@ -3999,7 +4047,7 @@ mod test {
                 assert_eq!(1, get_locations(7000, &client).await.len());
                 assert_eq!(
                     Some(DbCurrentLocation {
-                        ordinal_number: PgNumericU64(7000),
+                        doginal_number: PgNumericU64(7000),
                         block_height: PgNumericU64(800000),
                         tx_id: "b61b0172d95e266c18aea0c624db987e971a5d6d4ebc2aaed85da4642d635735"
                             .to_string(),

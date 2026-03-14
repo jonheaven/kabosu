@@ -1,7 +1,7 @@
 use dogecoin::{
     types::{
-        OrdinalInscriptionNumber, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
-        OrdinalInscriptionTransferDestination,
+        DoginalInscriptionNumber, DoginalInscriptionRevealData, DoginalInscriptionTransferData,
+        DoginalInscriptionTransferDestination,
     },
     utils::Context,
 };
@@ -16,10 +16,10 @@ pub fn get_test_ctx() -> Context {
 }
 
 pub struct Brc20RevealBuilder {
-    pub inscription_number: OrdinalInscriptionNumber,
+    pub inscription_number: DoginalInscriptionNumber,
     pub inscriber_address: Option<String>,
     pub inscription_id: String,
-    pub ordinal_number: u64,
+    pub doginal_number: u64,
     pub parents: Vec<String>,
 }
 
@@ -32,20 +32,20 @@ impl Default for Brc20RevealBuilder {
 impl Brc20RevealBuilder {
     pub fn new() -> Self {
         Brc20RevealBuilder {
-            inscription_number: OrdinalInscriptionNumber {
+            inscription_number: DoginalInscriptionNumber {
                 classic: 0,
                 jubilee: 0,
             },
             inscriber_address: Some("324A7GHA2azecbVBAFy4pzEhcPT1GjbUAp".to_string()),
             inscription_id: "9bb2314d666ae0b1db8161cb373fcc1381681f71445c4e0335aa80ea9c37fcddi0"
                 .to_string(),
-            ordinal_number: 0,
+            doginal_number: 0,
             parents: vec![],
         }
     }
 
     pub fn inscription_number(mut self, val: i64) -> Self {
-        self.inscription_number = OrdinalInscriptionNumber {
+        self.inscription_number = DoginalInscriptionNumber {
             classic: val,
             jubilee: val,
         };
@@ -62,8 +62,8 @@ impl Brc20RevealBuilder {
         self
     }
 
-    pub fn ordinal_number(mut self, val: u64) -> Self {
-        self.ordinal_number = val;
+    pub fn doginal_number(mut self, val: u64) -> Self {
+        self.doginal_number = val;
         self
     }
 
@@ -72,8 +72,8 @@ impl Brc20RevealBuilder {
         self
     }
 
-    pub fn build(self) -> OrdinalInscriptionRevealData {
-        OrdinalInscriptionRevealData {
+    pub fn build(self) -> DoginalInscriptionRevealData {
+        DoginalInscriptionRevealData {
             content_bytes: "".to_string(),
             content_type: "text/plain".to_string(),
             content_length: 10,
@@ -88,9 +88,9 @@ impl Brc20RevealBuilder {
             metaprotocol: None,
             metadata: None,
             parents: self.parents,
-            ordinal_number: self.ordinal_number,
-            ordinal_block_height: 767430,
-            ordinal_offset: 0,
+            doginal_number: self.doginal_number,
+            doginal_block_height: 767430,
+            doginal_offset: 0,
             tx_index: 0,
             transfers_pre_inscription: 0,
             koinupoint_post_inscription:
@@ -103,8 +103,8 @@ impl Brc20RevealBuilder {
 }
 
 pub struct Drc20TransferBuilder {
-    pub ordinal_number: u64,
-    pub destination: OrdinalInscriptionTransferDestination,
+    pub doginal_number: u64,
+    pub destination: DoginalInscriptionTransferDestination,
     pub koinupoint_post_transfer: String,
     pub tx_index: usize,
 }
@@ -118,8 +118,8 @@ impl Default for Drc20TransferBuilder {
 impl Drc20TransferBuilder {
     pub fn new() -> Self {
         Drc20TransferBuilder {
-            ordinal_number: 0,
-            destination: OrdinalInscriptionTransferDestination::Transferred(
+            doginal_number: 0,
+            destination: DoginalInscriptionTransferDestination::Transferred(
                 "bc1pls75sfwullhygkmqap344f5cqf97qz95lvle6fvddm0tpz2l5ffslgq3m0".to_string(),
             ),
             koinupoint_post_transfer:
@@ -128,12 +128,12 @@ impl Drc20TransferBuilder {
         }
     }
 
-    pub fn ordinal_number(mut self, val: u64) -> Self {
-        self.ordinal_number = val;
+    pub fn doginal_number(mut self, val: u64) -> Self {
+        self.doginal_number = val;
         self
     }
 
-    pub fn destination(mut self, val: OrdinalInscriptionTransferDestination) -> Self {
+    pub fn destination(mut self, val: DoginalInscriptionTransferDestination) -> Self {
         self.destination = val;
         self
     }
@@ -143,9 +143,9 @@ impl Drc20TransferBuilder {
         self
     }
 
-    pub fn build(self) -> OrdinalInscriptionTransferData {
-        OrdinalInscriptionTransferData {
-            ordinal_number: self.ordinal_number,
+    pub fn build(self) -> DoginalInscriptionTransferData {
+        DoginalInscriptionTransferData {
+            doginal_number: self.doginal_number,
             destination: self.destination,
             koinupoint_pre_transfer: "".to_string(),
             koinupoint_post_transfer: self.koinupoint_post_transfer,

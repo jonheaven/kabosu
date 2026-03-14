@@ -1,1 +1,3 @@
-This code is manually imported from [ordinals/ord](https://github.com/ordinals/ord) and it is used for all ordinal inscription parsing.
+# Doginals Inscription Parsing
+
+This code is manually imported from [doginals/ord](https://github.com/doginals/ord) and it is used for all doginal inscription parsing.This code is manually imported from [doginals/ord](https://github.com/doginals/ord) and it is used for all doginal inscription parsing.

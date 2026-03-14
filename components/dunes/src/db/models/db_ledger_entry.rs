@@ -7,7 +7,7 @@ use super::db_ledger_operation::DbLedgerOperation;
 /// A row in the `ledger` table.
 #[derive(Debug, Clone)]
 pub struct DbLedgerEntry {
-    pub rune_id: String,
+    pub dune_id: String,
     pub block_hash: String,
     pub block_height: PgNumericU64,
     pub tx_index: PgBigIntU32,
@@ -25,7 +25,7 @@ impl DbLedgerEntry {
     #[allow(clippy::too_many_arguments)]
     pub fn from_values(
         amount: Option<u128>,
-        rune_id: DuneId,
+        dune_id: DuneId,
         block_hash: &str,
         block_height: u64,
         tx_index: u32,
@@ -38,7 +38,7 @@ impl DbLedgerEntry {
         timestamp: u32,
     ) -> Self {
         DbLedgerEntry {
-            rune_id: rune_id.to_string(),
+            dune_id: dune_id.to_string(),
             block_hash: block_hash[2..].to_string(),
             block_height: PgNumericU64(block_height),
             tx_index: PgBigIntU32(tx_index),
@@ -55,7 +55,7 @@ impl DbLedgerEntry {
 
     pub fn from_pg_row(row: &Row) -> Self {
         DbLedgerEntry {
-            rune_id: row.get("rune_id"),
+            dune_id: row.get("dune_id"),
             block_hash: row.get("block_hash"),
             block_height: row.get("block_height"),
             tx_index: row.get("tx_index"),

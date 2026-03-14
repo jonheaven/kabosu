@@ -2,7 +2,7 @@ use bitcoin::Transaction;
 use dogecoin::{bitcoincore_rpc::Client as BitcoinRPCClient, utils::Context};
 use doginals_parser::Dune;
 
-/// Dogecoin Dunes does NOT use Bitcoin Runes' Taproot commit-reveal scheme.
+/// Dogecoin Dunes does NOT use Bitcoin Dunes' Taproot commit-reveal scheme.
 /// Dogecoin has no SegWit, no Taproot, and no witness data. Dune etching is
 /// performed via a single transaction containing the dunestone in an OP_RETURN
 /// output — no two-step commit-reveal process exists on Dogecoin.
@@ -10,11 +10,11 @@ use doginals_parser::Dune;
 /// All etchings are accepted at this validation layer. Replace this stub once
 /// the exact Dunes protocol validation rules are confirmed.
 /// Reference: https://github.com/sirduney/dunes-cli
-pub async fn rune_etching_has_valid_commit(
+pub async fn dune_etching_has_valid_commit(
     _bitcoin_client: &BitcoinRPCClient,
     _ctx: &Context,
     _tx: &Transaction,
-    _rune: &Dune,
+    _dune: &Dune,
     _reveal_block_height: u32,
     inputs_counter: &mut u64,
 ) -> Result<bool, String> {
@@ -31,7 +31,7 @@ mod tests {
         Witness,
     };
     use config::{Config, DogecoinConfig, DogecoinDataSource};
-    use dogecoin::utils::{bitcoind::dogecoin_get_client, Context};
+    use dogecoin::utils::{dogecoind::dogecoin_get_client, Context};
     use doginals_parser::{Dune, SpacedDune};
 
     use super::*;
@@ -116,45 +116,45 @@ mod tests {
             .into_script()
     }
 
-    /// Tests that reserved runes are correctly identified
-    /// This validates the core reserved rune detection logic
+    /// Tests that reserved dunes are correctly identified
+    /// This validates the core reserved dune detection logic
     #[test]
-    fn test_is_reserved_returns_true_for_reserved_rune() {
-        let reserved_rune = Dune::reserved(840000, 1);
-        // Additional reserved runes for testing
-        let reserved_rune2 = Dune(6402364363415443603228541259936211926);
-        let reserved_rune3 = Dune(6402364363415443603228541259936211927);
-        assert!(reserved_rune.is_reserved());
-        assert!(reserved_rune2.is_reserved());
-        assert!(reserved_rune3.is_reserved());
+    fn test_is_reserved_returns_true_for_reserved_dune() {
+        let reserved_dune = Dune::reserved(840000, 1);
+        // Additional reserved dunes for testing
+        let reserved_dune2 = Dune(6402364363415443603228541259936211926);
+        let reserved_dune3 = Dune(6402364363415443603228541259936211927);
+        assert!(reserved_dune.is_reserved());
+        assert!(reserved_dune2.is_reserved());
+        assert!(reserved_dune3.is_reserved());
     }
 
-    /// Tests that non-reserved runes are not incorrectly flagged as reserved
+    /// Tests that non-reserved dunes are not incorrectly flagged as reserved
     /// This ensures the RESERVED threshold is working correctly
     #[test]
-    fn test_is_reserved_returns_false_for_non_reserved_rune() {
-        let non_reserved_rune = Dune(1000); // Well below RESERVED threshold
-        assert!(!non_reserved_rune.is_reserved());
+    fn test_is_reserved_returns_false_for_non_reserved_dune() {
+        let non_reserved_dune = Dune(1000); // Well below RESERVED threshold
+        assert!(!non_reserved_dune.is_reserved());
     }
 
     /// Tests that transactions without witness data fail commitment validation
     /// This validates: "tx input is not a commit" case
-    /// Ignored: Dogecoin has no witness data; rune_etching_has_valid_commit is a stub that always returns true.
+    /// Ignored: Dogecoin has no witness data; dune_etching_has_valid_commit is a stub that always returns true.
     #[ignore]
     #[tokio::test]
-    async fn test_tx_commits_to_rune_fails_with_no_witness() {
+    async fn test_tx_commits_to_dune_fails_with_no_witness() {
         let config = MockDogecoinConfig::new();
         let ctx = Context::empty();
         let mut bitcoin_client = dogecoin_get_client(&config, &ctx);
         let tx = create_mock_transaction_no_witness();
-        let rune = Dune(1000);
+        let dune = Dune(1000);
         let mut inputs_counter = 0;
 
-        let result = rune_etching_has_valid_commit(
+        let result = dune_etching_has_valid_commit(
             &mut bitcoin_client,
             &ctx,
             &tx,
-            &rune,
+            &dune,
             840005,
             &mut inputs_counter,
         )
@@ -167,14 +167,14 @@ mod tests {
 
     /// Tests that transactions with incorrect commitment data fail validation
     /// This validates the commitment matching logic
-    /// Ignored: Dogecoin has no witness data; rune_etching_has_valid_commit is a stub that always returns true.
+    /// Ignored: Dogecoin has no witness data; dune_etching_has_valid_commit is a stub that always returns true.
     #[ignore]
     #[tokio::test]
-    async fn test_tx_commits_to_rune_fails_with_wrong_commitment() {
+    async fn test_tx_commits_to_dune_fails_with_wrong_commitment() {
         let config = MockDogecoinConfig::new();
         let ctx = Context::empty();
         let mut bitcoin_client = dogecoin_get_client(&config, &ctx);
-        let rune = Dune(1000);
+        let dune = Dune(1000);
         let wrong_commitment = b"wrong_commitment_data";
 
         // Create tapscript with wrong commitment
@@ -189,11 +189,11 @@ mod tests {
         let tx = create_mock_transaction_with_witness(witness_data);
         let mut inputs_counter = 0;
 
-        let result = rune_etching_has_valid_commit(
+        let result = dune_etching_has_valid_commit(
             &mut bitcoin_client,
             &ctx,
             &tx,
-            &rune,
+            &dune,
             840005,
             &mut inputs_counter,
         )
@@ -204,51 +204,51 @@ mod tests {
         assert_eq!(inputs_counter, 1);
     }
 
-    /// Tests that rune commitment generation is deterministic and correct
-    /// This validates the core commitment encoding (rune value as bytes, not a hash!)
+    /// Tests that dune commitment generation is deterministic and correct
+    /// This validates the core commitment encoding (dune value as bytes, not a hash!)
     #[test]
-    fn test_rune_commitment_generation() {
-        let rune = Dune(1000);
-        let commitment = rune.commitment();
+    fn test_dune_commitment_generation() {
+        let dune1 = Dune(1000);
+        let commitment = dune1.commitment();
 
-        // The commitment is the rune value encoded as bytes (little-endian)
+        // The commitment is the dune value encoded as bytes (little-endian)
         // For Dune(1000), this is [232, 3] (little-endian encoding of 1000)
         // 1000 = 0x03E8 -> little-endian [0xE8, 0x03] = [232, 3]
         assert_eq!(commitment.len(), 2);
         assert_eq!(commitment, &[232, 3]);
 
-        // Same rune should generate same commitment
-        let rune2 = Dune(1000);
-        let commitment2 = rune2.commitment();
+        // Same dune should generate same commitment
+        let dune2 = Dune(1000);
+        let commitment2 = dune2.commitment();
         assert_eq!(commitment, commitment2);
 
-        // Different rune should generate different commitment
-        let rune3 = Dune(2000);
-        let commitment3 = rune3.commitment();
+        // Different dune should generate different commitment
+        let dune3 = Dune(2000);
+        let commitment3 = dune3.commitment();
         assert_ne!(commitment, commitment3);
         // Dune(2000) = 0x07D0 -> little-endian [0xD0, 0x07] = [208, 7]
         assert_eq!(commitment3, &[208, 7]);
 
-        // Test larger rune value that requires more bytes
-        let large_rune = Dune(0x123456789ABCDEF0);
-        let large_commitment = large_rune.commitment();
+        // Test larger dune value that requires more bytes
+        let large_dune = Dune(0x123456789ABCDEF0);
+        let large_commitment = large_dune.commitment();
         assert!(large_commitment.len() > 2); // Larger values need more bytes
 
-        // Test very small rune (single byte)
-        let small_rune = Dune(42);
-        let small_commitment = small_rune.commitment();
+        // Test very small dune (single byte)
+        let small_dune = Dune(42);
+        let small_commitment = small_dune.commitment();
         assert_eq!(small_commitment, &[42]); // Should be just [42]
     }
 
-    // Helper function for testing - mimics tx_commits_to_rune but with mockable RPC calls
-    async fn tx_commits_to_rune_with_mocks(
+    // Helper function for testing - mimics tx_commits_to_dune but with mockable RPC calls
+    async fn tx_commits_to_dune_with_mocks(
         tx: &Transaction,
-        rune: &Dune,
+        dune: &Dune,
         reveal_block_height: u32,
         mock_commit_tx_block_height: u32,
         mock_is_taproot: bool,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let commitment = rune.commitment();
+        let commitment = dune.commitment();
 
         for input in &tx.input {
             let Some(tapscript) = unversioned_leaf_script_from_witness(&input.witness) else {
@@ -288,8 +288,8 @@ mod tests {
         Ok(false)
     }
 
-    fn create_transaction_with_valid_commitment(rune: &Dune) -> Transaction {
-        let commitment = rune.commitment();
+    fn create_transaction_with_valid_commitment(dune: &Dune) -> Transaction {
+        let commitment = dune.commitment();
         let tapscript = create_tapscript_with_commitment(&commitment);
 
         // For taproot script path spending, we need:
@@ -308,17 +308,17 @@ mod tests {
     /// Tests that commit_tx in the same block as reveal_tx fails validation
     /// This validates: "commit_tx (tx_input) happened in same block"
     #[tokio::test]
-    async fn test_tx_commits_to_rune_fails_same_block() {
-        let rune = Dune(1000);
-        let tx = create_transaction_with_valid_commitment(&rune);
+    async fn test_tx_commits_to_dune_fails_same_block() {
+        let dune = Dune(1000);
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         let reveal_block_height = 840010;
         let commit_block_height = 840010; // Same block!
         let is_taproot = true;
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -334,17 +334,17 @@ mod tests {
     /// Tests that commit_tx with insufficient confirmations fails validation
     /// This validates: "commit_tx has not enough block heights confirmed (6)"
     #[tokio::test]
-    async fn test_tx_commits_to_rune_fails_insufficient_confirmations() {
-        let rune = Dune(1000);
-        let tx = create_transaction_with_valid_commitment(&rune);
+    async fn test_tx_commits_to_dune_fails_insufficient_confirmations() {
+        let dune = Dune(1000);
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         let reveal_block_height = 840010;
         let commit_block_height = 840006; // 5 confirmations (840010 - 840006 + 1 = 5)
         let is_taproot = true;
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -358,17 +358,17 @@ mod tests {
 
     /// Tests edge case: exactly 5 confirmations should fail
     #[tokio::test]
-    async fn test_tx_commits_to_rune_fails_exactly_five_confirmations() {
-        let rune = Dune(1000);
-        let tx = create_transaction_with_valid_commitment(&rune);
+    async fn test_tx_commits_to_dune_fails_exactly_five_confirmations() {
+        let dune = Dune(1000);
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         let reveal_block_height = 840010;
         let commit_block_height = 840006; // Exactly 5 confirmations
         let is_taproot = true;
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -381,17 +381,17 @@ mod tests {
 
     /// Tests that exactly 6 confirmations should succeed
     #[tokio::test]
-    async fn test_tx_commits_to_rune_succeeds_exactly_six_confirmations() {
-        let rune = Dune(1000);
-        let tx = create_transaction_with_valid_commitment(&rune);
+    async fn test_tx_commits_to_dune_succeeds_exactly_six_confirmations() {
+        let dune = Dune(1000);
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         let reveal_block_height = 840010;
         let commit_block_height = 840005; // Exactly 6 confirmations (840010 - 840005 + 1 = 6)
         let is_taproot = true;
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -406,17 +406,17 @@ mod tests {
     /// Tests that proper commitment with ≥6 confirmations succeeds
     /// This validates the happy path of commitment validation
     #[tokio::test]
-    async fn test_tx_commits_to_rune_succeeds_with_valid_commitment() {
-        let rune = Dune(1000);
-        let tx = create_transaction_with_valid_commitment(&rune);
+    async fn test_tx_commits_to_dune_succeeds_with_valid_commitment() {
+        let dune = Dune(1000);
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         let reveal_block_height = 840010;
         let commit_block_height = 840000; // 11 confirmations (840010 - 840000 + 1 = 11)
         let is_taproot = true;
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -431,17 +431,17 @@ mod tests {
     /// Tests that non-taproot commitment transactions fail
     /// This validates the taproot requirement
     #[tokio::test]
-    async fn test_tx_commits_to_rune_fails_non_taproot() {
-        let rune = Dune(1000);
-        let tx = create_transaction_with_valid_commitment(&rune);
+    async fn test_tx_commits_to_dune_fails_non_taproot() {
+        let dune = Dune(1000);
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         let reveal_block_height = 840010;
         let commit_block_height = 840000; // Sufficient confirmations
         let is_taproot = false; // Not a taproot transaction
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -455,9 +455,9 @@ mod tests {
 
     /// Tests multiple inputs where only one has valid commitment
     #[tokio::test]
-    async fn test_tx_commits_to_rune_multiple_inputs_one_valid() {
-        let rune = Dune(1000);
-        let commitment = rune.commitment();
+    async fn test_tx_commits_to_dune_multiple_inputs_one_valid() {
+        let dune = Dune(1000);
+        let commitment = dune.commitment();
 
         // Create transaction with multiple inputs
         let mut tx = create_mock_transaction_no_witness();
@@ -494,9 +494,9 @@ mod tests {
         let commit_block_height = 840000;
         let is_taproot = true;
 
-        let result = tx_commits_to_rune_with_mocks(
+        let result = tx_commits_to_dune_with_mocks(
             &tx,
-            &rune,
+            &dune,
             reveal_block_height,
             commit_block_height,
             is_taproot,
@@ -516,24 +516,24 @@ mod tests {
     #[tokio::test]
     async fn test_superdome_commit_validation_succeeds() {
         let spaced = SpacedDune::from_str("SUPERDOME").unwrap();
-        let rune = spaced.dune;
+        let dune = spaced.dune;
 
-        // Build a transaction whose tapscript witness includes the rune's commitment
-        let tx = create_transaction_with_valid_commitment(&rune);
+        // Build a transaction whose tapscript witness includes the dune's commitment
+        let tx = create_transaction_with_valid_commitment(&dune);
 
         // Mock validation: taproot=true, commit height 910598, reveal height 910603
         // Confirmations = 910603 - 910598 + 1 = 6 (meets threshold)
-        let result = tx_commits_to_rune_with_mocks(&tx, &rune, 910603, 910598, true)
+        let result = tx_commits_to_dune_with_mocks(&tx, &dune, 910603, 910598, true)
             .await
             .unwrap();
         assert!(result);
     }
 
-    /// Ensure that omitted or reserved rune names don't require commit validation
+    /// Ensure that omitted or reserved dune names don't require commit validation
     /// We simulate this by ensuring the commitment path would fail if called,
     /// but our higher-level logic should skip calling it entirely for reserved/omitted.
     #[test]
-    fn test_reserved_or_omitted_rune_commitment_not_required() {
+    fn test_reserved_or_omitted_dune_commitment_not_required() {
         // Reserved via omitted name is handled at IndexCache::apply_etching layer, but
         // here we check the underlying rule: reserved detection works and commitment bytes
         // are still generated deterministically (not used for validation in reserved path).
@@ -541,7 +541,7 @@ mod tests {
         assert!(reserved.is_reserved());
 
         // Named non-reserved like SUPERDOME must not be reserved
-        let named = SpacedDune::from_str("SUPERDOME").unwrap().rune;
+        let named = SpacedDune::from_str("SUPERDOME").unwrap().dune;
         assert!(!named.is_reserved());
     }
 
@@ -570,13 +570,13 @@ mod tests {
     fn test_two_etchings_same_block_first_valid_second_invalid() {
         let _config = create_mock_config();
 
-        // Create two runes with different characteristics
-        let rune1 = Dune::from_str("TESTRUNEONE").unwrap();
-        let rune2 = Dune::from_str("TESTRUNETWO").unwrap();
+        // Create two dunes with different characteristics
+        let dune1 = Dune::from_str("TESTDUNEONE").unwrap();
+        let dune2 = Dune::from_str("TESTDUNETWO").unwrap();
 
-        // Verify rune characteristics
-        assert!(!rune1.is_reserved(), "First rune should not be reserved");
-        assert!(!rune2.is_reserved(), "Second rune should not be reserved");
+        // Verify dune characteristics
+        assert!(!dune1.is_reserved(), "First dune should not be reserved");
+        assert!(!dune2.is_reserved(), "Second dune should not be reserved");
 
         // Test commit-reveal validation logic
         let reveal_block = 840100;
@@ -604,18 +604,18 @@ mod tests {
         );
     }
 
-    /// Two etchings in the same block - both invalid (reserved runes)
-    /// This tests the scenario where both etchings fail validation due to reserved rune names
+    /// Two etchings in the same block - both invalid (reserved dunes)
+    /// This tests the scenario where both etchings fail validation due to reserved dune names
     #[test]
     fn test_two_etchings_same_block_both_invalid_reserved() {
-        // Create two runes with reserved names (which should be invalid)
-        // Using actual reserved rune names that are known to be reserved
-        let rune1 = Dune::from_str("AAAAAAAAAAAAAAAAZOMJMODBYFG").unwrap(); // Reserved rune
-        let rune2 = Dune::from_str("AAAAAAAAAAAAAAAAZOMJMODBYFH").unwrap(); // Another reserved rune
+        // Create two dunes with reserved names (which should be invalid)
+        // Using actual reserved dune names that are known to be reserved
+        let dune1 = Dune::from_str("AAAAAAAAAAAAAAAAZOMJMODBYFG").unwrap(); // Reserved dune
+        let dune2 = Dune::from_str("AAAAAAAAAAAAAAAAZOMJMODBYFH").unwrap(); // Another reserved dune
 
-        // Both runes should be reserved and therefore invalid
-        assert!(rune1.is_reserved(), "First rune should be reserved");
-        assert!(rune2.is_reserved(), "Second rune should be reserved");
+        // Both dunes should be reserved and therefore invalid
+        assert!(dune1.is_reserved(), "First dune should be reserved");
+        assert!(dune2.is_reserved(), "Second dune should be reserved");
 
         // Test commit-reveal validation logic (should fail regardless of confirmations)
         let reveal_block = 840100;
@@ -625,7 +625,7 @@ mod tests {
         let confirmations1 = reveal_block - commit_block1 + 1;
         let confirmations2 = reveal_block - commit_block2 + 1;
 
-        // Even with sufficient confirmations, reserved runes should be invalid
+        // Even with sufficient confirmations, reserved dunes should be invalid
         assert!(
             confirmations1 >= 6,
             "First etching should have sufficient confirmations"
@@ -634,20 +634,20 @@ mod tests {
             confirmations2 >= 6,
             "Second etching should have sufficient confirmations"
         );
-        // But the runes themselves are reserved, so they should be invalid
+        // But the dunes themselves are reserved, so they should be invalid
     }
 
     /// Two etchings in the same block - both valid
     /// This tests the scenario where both etchings have valid commitments
     #[test]
     fn test_two_etchings_same_block_both_valid() {
-        // Create two runes with valid names
-        let rune1 = Dune::from_str("VALIDRUNEONE").unwrap();
-        let rune2 = Dune::from_str("VALIDRUNETWO").unwrap();
+        // Create two dunes with valid names
+        let dune1 = Dune::from_str("VALIDDUNEONE").unwrap();
+        let dune2 = Dune::from_str("VALIDDUNETWO").unwrap();
 
-        // Both runes should be non-reserved and therefore potentially valid
-        assert!(!rune1.is_reserved(), "First rune should not be reserved");
-        assert!(!rune2.is_reserved(), "Second rune should not be reserved");
+        // Both dunes should be non-reserved and therefore potentially valid
+        assert!(!dune1.is_reserved(), "First dune should not be reserved");
+        assert!(!dune2.is_reserved(), "Second dune should not be reserved");
 
         // Test commit-reveal validation logic
         let reveal_block = 840100;
@@ -679,9 +679,9 @@ mod tests {
     /// This tests the scenario where commit_block_height + 5 ≤ reveal_block_height
     #[test]
     fn test_commit_reveal_insufficient_confirmations() {
-        // Test the specific rune from the example
-        let rune = Dune::from_str("EWGRWEGBSGRWEGFB").unwrap();
-        assert_eq!(rune.to_string(), "EWGRWEGBSGRWEGFB");
+        // Test the specific dune from the example
+        let dune = Dune::from_str("EWGRWEGBSGRWEGFB").unwrap();
+        assert_eq!(dune.to_string(), "EWGRWEGBSGRWEGFB");
 
         // Test insufficient confirmations scenario
         let reveal_block = 874993;
@@ -733,12 +733,12 @@ mod tests {
     }
 
     /// Test the specific example from the TODO comment
-    /// This tests the EWGRWEGBSGRWEGFB rune with the specific block heights
+    /// This tests the EWGRWEGBSGRWEGFB dune with the specific block heights
     #[test]
     fn test_specific_example_ewgrwegsgrwegfb() {
-        // Verify the specific rune name
-        let rune = Dune::from_str("EWGRWEGBSGRWEGFB").unwrap();
-        assert_eq!(rune.to_string(), "EWGRWEGBSGRWEGFB");
+        // Verify the specific dune name
+        let dune = Dune::from_str("EWGRWEGBSGRWEGFB").unwrap();
+        assert_eq!(dune.to_string(), "EWGRWEGBSGRWEGFB");
 
         // Test the commit-reveal validation logic
         // From the example: commit_block = 874948, reveal_block = 874993
@@ -800,13 +800,13 @@ mod tests {
         assert!(confirmations4 < 6, "Should be invalid");
     }
 
-    /// Test the specific rune names.
+    /// Test the specific dune names.
     #[test]
-    fn test_specific_rune_names_from_todo() {
-        let rune = Dune::from_str("EWGRWEGBSGRWEGFB").unwrap();
-        assert_eq!(rune.to_string(), "EWGRWEGBSGRWEGFB");
+    fn test_specific_dune_names_from_todo() {
+        let dune = Dune::from_str("EWGRWEGBSGRWEGFB").unwrap();
+        assert_eq!(dune.to_string(), "EWGRWEGBSGRWEGFB");
         assert!(
-            !rune.is_reserved(),
+            !dune.is_reserved(),
             "EWGRWEGBSGRWEGFB should not be reserved"
         );
 

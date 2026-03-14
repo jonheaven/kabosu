@@ -82,7 +82,7 @@ impl PrometheusMonitoring {
         let last_indexed_block_height = Self::create_and_register_uint64_gauge(
             &registry,
             "last_indexed_block_height",
-            "The latest Bitcoin block indexed for ordinals.",
+            "The latest Bitcoin block indexed for doginals.",
         );
         let last_indexed_inscription_number = Self::create_and_register_uint64_gauge(
             &registry,
@@ -296,7 +296,7 @@ impl PrometheusMonitoring {
         self.metrics_record_drc20_transfer_send_per_block(0);
 
         // Read initial values from the database for inscriptions
-        let mut ord_client = pg_pool_client(&pg_pools.ordinals).await?;
+        let mut ord_client = pg_pool_client(&pg_pools.doginals).await?;
         let ord_tx = pg_begin(&mut ord_client).await?;
 
         let blessed_count = doginals_pg::get_blessed_count_from_counts_by_type(&ord_tx)

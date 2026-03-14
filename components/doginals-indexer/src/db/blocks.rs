@@ -199,11 +199,11 @@ pub fn delete_blocks_in_block_range(
 
 #[cfg(test)]
 pub fn insert_standardized_block(
-    block: &bitcoind::types::DogecoinBlockData,
+    block: &dogecoin::types::DogecoinBlockData,
     blocks_db_rw: &DB,
     ctx: &Context,
 ) {
-    let block_bytes = match bitcoind::types::BlockBytesCursor::from_standardized_block(&block) {
+    let block_bytes = match dogecoin::types::BlockBytesCursor::from_standardized_block(&block) {
         Ok(block_bytes) => block_bytes,
         Err(e) => {
             try_error!(

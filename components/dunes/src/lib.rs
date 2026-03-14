@@ -9,7 +9,7 @@ use std::{
 use config::Config;
 use db::{
     cache::index_cache::IndexCache,
-    index::{get_rune_genesis_block_height, index_block, roll_back_block},
+    index::{get_dune_genesis_block_height, index_block, roll_back_block},
 };
 use deadpool_postgres::Pool;
 use dogecoin::{
@@ -30,7 +30,7 @@ pub mod utils;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-async fn new_runes_indexer_runloop(
+async fn new_dunes_indexer_runloop(
     pg_pool: &Pool,
     prometheus: &PrometheusMonitoring,
     abort_signal: &Arc<AtomicBool>,
@@ -45,7 +45,7 @@ async fn new_runes_indexer_runloop(
     let prometheus_moved = prometheus.clone();
     let abort_signal_moved = abort_signal.clone();
     let pg_pool_moved = pg_pool.clone();
-    let handle: JoinHandle<()> = hiro_system_kit::thread_named("RunesIndexer")
+    let handle: JoinHandle<()> = hiro_system_kit::thread_named("DunesIndexer")
         .spawn(move || {
             future_block_on(&ctx_moved.clone(), async move {
                 #[cfg(feature = "dhat-heap")]
@@ -60,10 +60,10 @@ async fn new_runes_indexer_runloop(
                     match commands_rx.recv() {
                         Ok(command) => match command {
                             IndexerCommand::StoreCompactedBlocks(_) => {
-                                // No-op. The Runes indexer has no need for compacted blocks.
+                                // No-op. The Dunes indexer has no need for compacted blocks.
                                 try_warn!(
                                     ctx_moved,
-                                    "Runes indexer received unexpected StoreCompactedBlocks command"
+                                    "Dunes indexer received unexpected StoreCompactedBlocks command"
                                 );
                             }
                             IndexerCommand::IndexBlocks {
@@ -96,14 +96,14 @@ async fn new_runes_indexer_runloop(
                         Err(error) => {
                             try_error!(
                                 ctx_moved,
-                                "Runes indexer received invalid command: {}",
+                                "Dunes indexer received invalid command: {}",
                                 error
                             );
                             return Err(error.to_string());
                         }
                     }
                 }
-                try_info!(ctx_moved, "RunesIndexer thread complete");
+                try_info!(ctx_moved, "DunesIndexer thread complete");
                 Ok(())
             });
         })
@@ -113,7 +113,7 @@ async fn new_runes_indexer_runloop(
     let chain_tip = db::get_chain_tip(&pg_client)
         .await
         .unwrap_or(BlockIdentifier {
-            index: get_rune_genesis_block_height(config.dogecoin.network) - 1,
+            index: get_dune_genesis_block_height(config.dogecoin.network) - 1,
             hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
         });
     Ok(Indexer {
@@ -161,7 +161,7 @@ pub async fn start_dunes_indexer(
 
     let prometheus = PrometheusMonitoring::new();
     let mut indexer =
-        new_runes_indexer_runloop(&pool, &prometheus, abort_signal, config, ctx).await?;
+        new_dunes_indexer_runloop(&pool, &prometheus, abort_signal, config, ctx).await?;
 
     if let Some(metrics) = &config.metrics {
         if metrics.enabled {
@@ -182,21 +182,21 @@ pub async fn start_dunes_indexer(
     // Initialize metrics with current state
     {
         let pg_client = pg_pool_client(&pool).await?;
-        let max_rune_number = db::pg_get_max_rune_number(&pg_client).await;
+        let max_dune_number = db::pg_get_max_dune_number(&pg_client).await;
         let chain_tip = db::get_chain_tip(&pg_client)
             .await
             .unwrap_or(BlockIdentifier {
-                index: get_rune_genesis_block_height(config.dogecoin.network) - 1,
+                index: get_dune_genesis_block_height(config.dogecoin.network) - 1,
                 hash: "0x0000000000000000000000000000000000000000000000000000000000000000".into(),
             });
         prometheus
-            .initialize(max_rune_number as u64, chain_tip.index)
+            .initialize(max_dune_number as u64, chain_tip.index)
             .await?;
     }
 
     start_dogecoin_indexer(
         &mut indexer,
-        get_rune_genesis_block_height(config.dogecoin.network),
+        get_dune_genesis_block_height(config.dogecoin.network),
         stream_blocks_at_chain_tip,
         false,
         abort_signal,

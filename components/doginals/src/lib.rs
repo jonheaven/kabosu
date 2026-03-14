@@ -1,4 +1,4 @@
-//! Types for interoperating with ordinals, inscriptions, and dunes.
+//! Types for interoperating with doginals, inscriptions, and dunes.
 #![allow(clippy::large_enum_variant)]
 
 use {
@@ -45,7 +45,7 @@ pub const DOGECOIN_HALVING_INTERVAL: u32 = 100_000;
 /// Internal epoch machinery constant.
 ///
 /// Set to 1 so that `Epoch(n)` maps 1-to-1 with block height `n`.  This lets
-/// the existing ordinals epoch machinery work unmodified while `Epoch::subsidy`
+/// the existing doginals epoch machinery work unmodified while `Epoch::subsidy`
 /// and `Epoch::starting_sat` delegate to the Dogecoin-specific subsidy
 /// functions in `epoch.rs`.  The *actual* Dogecoin halving interval is
 /// `DOGECOIN_HALVING_INTERVAL`.

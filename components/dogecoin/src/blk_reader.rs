@@ -668,7 +668,7 @@ fn read_raw_tx(
         metadata: DogecoinTransactionMetadata {
             inputs,
             outputs,
-            ordinal_operations: vec![],
+            doginal_operations: vec![],
             drc20_operation: None,
             proof: None,
             fee: 0,

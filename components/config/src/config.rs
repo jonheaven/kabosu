@@ -336,7 +336,7 @@ impl Config {
             },
             doginals: Some(DoginalConfig {
                 db: PgDatabaseConfig {
-                    dbname: "ordinals".to_string(),
+                    dbname: "doginals".to_string(),
                     host: "localhost".to_string(),
                     port: 5432,
                     user: "postgres".to_string(),
@@ -350,7 +350,7 @@ impl Config {
             dunes: Some(DunesConfig {
                 lru_cache_size: DEFAULT_LRU_CACHE_SIZE,
                 db: PgDatabaseConfig {
-                    dbname: "runes".to_string(),
+                    dbname: "dunes".to_string(),
                     host: "localhost".to_string(),
                     port: 5432,
                     user: "postgres".to_string(),
@@ -432,7 +432,7 @@ impl Config {
         self.doginals.as_ref()?.predicates.as_ref()
     }
 
-    pub fn ordinals_drc20_config(&self) -> Option<&DoginalDrc20Config> {
+    pub fn doginals_drc20_config(&self) -> Option<&DoginalDrc20Config> {
         if let Some(DoginalConfig {
             meta_protocols:
                 Some(DoginalMetaProtocolsConfig {
@@ -450,14 +450,14 @@ impl Config {
 
     pub fn assert_doginals_config(&self) -> Result<(), String> {
         if self.doginals.is_none() {
-            return Err("Config entry for `ordinals` not found in config file.".to_string());
+            return Err("Config entry for `doginals` not found in config file.".to_string());
         }
         Ok(())
     }
 
     pub fn assert_dunes_config(&self) -> Result<(), String> {
         if self.dunes.is_none() {
-            return Err("Config entry for `runes` not found in config file.".to_string());
+            return Err("Config entry for `dunes` not found in config file.".to_string());
         }
         Ok(())
     }

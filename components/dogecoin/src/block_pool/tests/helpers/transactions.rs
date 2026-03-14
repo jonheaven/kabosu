@@ -62,7 +62,7 @@ pub fn generate_test_tx_bitcoin_p2pkh_transfer(
         metadata: DogecoinTransactionMetadata {
             inputs: vec![],
             outputs,
-            ordinal_operations: vec![],
+            doginal_operations: vec![],
             drc20_operation: None,
             proof: None,
             fee: 0,

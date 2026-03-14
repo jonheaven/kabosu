@@ -6,10 +6,10 @@ use dogecoin::{
     bitcoincore_rpc::RpcApi,
     try_error, try_warn,
     types::{
-        BlockBytesCursor, BlockIdentifier, OrdinalInscriptionNumber, TransactionBytesCursor,
+        BlockBytesCursor, BlockIdentifier, DoginalInscriptionNumber, TransactionBytesCursor,
         TransactionIdentifier, TransactionInputBytesCursor,
     },
-    utils::{bitcoind::dogecoin_get_client, Context},
+    utils::{dogecoind::dogecoin_get_client, Context},
 };
 use doginals::{height::Height, koinu::Koinu};
 use fxhash::FxHasher;
@@ -19,22 +19,22 @@ use crate::db::blocks::find_pinned_block_bytes_at_block_height;
 
 #[derive(Clone, Debug)]
 pub struct TraversalResult {
-    pub inscription_number: OrdinalInscriptionNumber,
+    pub inscription_number: DoginalInscriptionNumber,
     pub inscription_input_index: usize,
     pub transaction_identifier_inscription: TransactionIdentifier,
-    pub ordinal_number: u64,
+    pub doginal_number: u64,
     pub transfers: u32,
 }
 
 impl TraversalResult {
-    pub fn get_ordinal_coinbase_height(&self) -> u64 {
-        let koinu = Koinu(self.ordinal_number);
+    pub fn get_doginal_coinbase_height(&self) -> u64 {
+        let koinu = Koinu(self.doginal_number);
         koinu.height().n() as u64
     }
 
-    pub fn get_ordinal_coinbase_offset(&self) -> u64 {
-        let koinu = Koinu(self.ordinal_number);
-        self.ordinal_number - koinu.height().starting_sat().n()
+    pub fn get_doginal_coinbase_offset(&self) -> u64 {
+        let koinu = Koinu(self.doginal_number);
+        self.doginal_number - koinu.height().starting_sat().n()
     }
 
     pub fn get_inscription_id(&self) -> String {
@@ -59,12 +59,12 @@ pub fn compute_koinu_number(
     config: &Config,
     ctx: &Context,
 ) -> Result<(TraversalResult, u64, Vec<(u32, [u8; 8], usize)>), String> {
-    let mut ordinal_offset = inscription_pointer;
-    let ordinal_block_number = block_identifier.index as u32;
+    let mut doginal_offset = inscription_pointer;
+    let doginal_block_number = block_identifier.index as u32;
     let txid = transaction_identifier.get_8_hash_bytes();
     let mut back_track = vec![];
 
-    let (mut tx_cursor, mut ordinal_block_number) = match traversals_cache
+    let (mut tx_cursor, mut doginal_block_number) = match traversals_cache
         .get(&(block_identifier.index as u32, txid))
     {
         Some(entry) => {
@@ -78,9 +78,9 @@ pub fn compute_koinu_number(
             )
         }
         None => {
-            match find_pinned_block_bytes_at_block_height(ordinal_block_number, 3, blocks_db, ctx) {
+            match find_pinned_block_bytes_at_block_height(doginal_block_number, 3, blocks_db, ctx) {
                 None => {
-                    return Err(format!("block #{ordinal_block_number} not in database"));
+                    return Err(format!("block #{doginal_block_number} not in database"));
                 }
                 Some(block_bytes) => {
                     let cursor = BlockBytesCursor::new(block_bytes.as_ref());
@@ -92,7 +92,7 @@ pub fn compute_koinu_number(
                             ),
                             tx.inputs[inscription_input_index].block_height,
                         ),
-                        None => return Err(format!("txid not in block #{ordinal_block_number}")),
+                        None => return Err(format!("txid not in block #{doginal_block_number}")),
                     }
                 }
             }
@@ -110,7 +110,7 @@ pub fn compute_koinu_number(
             ));
         }
 
-        if let Some(cached_tx) = traversals_cache.get(&(ordinal_block_number, tx_cursor.0)) {
+        if let Some(cached_tx) = traversals_cache.get(&(doginal_block_number, tx_cursor.0)) {
             let tx = cached_tx.value();
 
             let mut next_found_in_cache = false;
@@ -121,15 +121,15 @@ pub fn compute_koinu_number(
                 }
                 sats_out += output_value;
             }
-            sats_out += ordinal_offset;
+            sats_out += doginal_offset;
 
             let mut sats_in = 0;
             for input in tx.inputs.iter() {
                 sats_in += input.txin_value;
 
                 if sats_out < sats_in {
-                    ordinal_offset = sats_out - (sats_in - input.txin_value);
-                    ordinal_block_number = input.block_height;
+                    doginal_offset = sats_out - (sats_in - input.txin_value);
+                    doginal_block_number = input.block_height;
                     tx_cursor = (input.txin, input.vout as usize);
                     next_found_in_cache = true;
                     break;
@@ -148,8 +148,8 @@ pub fn compute_koinu_number(
                 );
                 return Ok((
                     TraversalResult {
-                        inscription_number: OrdinalInscriptionNumber::zero(),
-                        ordinal_number: 0,
+                        inscription_number: DoginalInscriptionNumber::zero(),
+                        doginal_number: 0,
                         transfers: 0,
                         inscription_input_index,
                         transaction_identifier_inscription: transaction_identifier.clone(),
@@ -161,19 +161,19 @@ pub fn compute_koinu_number(
         }
 
         let pinned_block_bytes = {
-            match find_pinned_block_bytes_at_block_height(ordinal_block_number, 3, blocks_db, ctx) {
+            match find_pinned_block_bytes_at_block_height(doginal_block_number, 3, blocks_db, ctx) {
                 Some(block) => block,
                 None => {
                     // Block is before our RocksDB start height — fetch the tx directly from RPC.
                     try_warn!(
                         ctx,
-                        "block #{ordinal_block_number} not in local DB while traversing {}; fetching tx from RPC",
+                        "block #{doginal_block_number} not in local DB while traversing {}; fetching tx from RPC",
                         transaction_identifier.hash
                     );
                     let rpc_cursor =
-                        fetch_tx_cursor_from_rpc(ordinal_block_number, txid, config, ctx)?;
+                        fetch_tx_cursor_from_rpc(doginal_block_number, txid, config, ctx)?;
                     // Warm the cache so the next iteration takes the fast cached path.
-                    traversals_cache.insert((ordinal_block_number, tx_cursor.0), rpc_cursor);
+                    traversals_cache.insert((doginal_block_number, tx_cursor.0), rpc_cursor);
                     continue;
                 }
             }
@@ -192,10 +192,10 @@ pub fn compute_koinu_number(
                 }
                 intra_coinbase_output_offset += output_value;
             }
-            ordinal_offset += intra_coinbase_output_offset;
+            doginal_offset += intra_coinbase_output_offset;
 
-            let subsidy = Height(ordinal_block_number).subsidy();
-            if ordinal_offset < subsidy {
+            let subsidy = Height(doginal_block_number).subsidy();
+            if doginal_offset < subsidy {
                 // Great!
                 break;
             }
@@ -215,10 +215,10 @@ pub fn compute_koinu_number(
                 }
 
                 let fee = total_in - total_out;
-                if accumulated_fees + fee > ordinal_offset {
+                if accumulated_fees + fee > doginal_offset {
                     // We are looking at the right transaction
                     // Retraverse the inputs to select the index to be picked
-                    let offset_within_fee = ordinal_offset - accumulated_fees;
+                    let offset_within_fee = doginal_offset - accumulated_fees;
                     total_out += offset_within_fee;
                     let mut sats_in = 0;
 
@@ -226,8 +226,8 @@ pub fn compute_koinu_number(
                         sats_in += input.txin_value;
 
                         if sats_in > total_out {
-                            ordinal_offset = total_out - (sats_in - input.txin_value);
-                            ordinal_block_number = input.block_height;
+                            doginal_offset = total_out - (sats_in - input.txin_value);
+                            doginal_block_number = input.block_height;
                             tx_cursor = (input.txin, input.vout as usize);
                             break;
                         }
@@ -244,7 +244,7 @@ pub fn compute_koinu_number(
                 Some(entry) => entry,
                 None => {
                     return Err(format!(
-                        "unable to retrieve tx ancestor {} in block #{ordinal_block_number} while traversing satpoint {}:{inscription_input_index}",
+                        "unable to retrieve tx ancestor {} in block #{doginal_block_number} while traversing satpoint {}:{inscription_input_index}",
                         hex::encode(txid),
                         transaction_identifier.get_hash_bytes_str(),
                     ));
@@ -258,18 +258,18 @@ pub fn compute_koinu_number(
                 }
                 sats_out += output_value;
             }
-            sats_out += ordinal_offset;
+            sats_out += doginal_offset;
 
             let mut sats_in = 0;
             for input in tx_bytes_cursor.inputs.iter() {
                 sats_in += input.txin_value;
 
                 if sats_out < sats_in {
-                    back_track.push((ordinal_block_number, tx_cursor.0, tx_cursor.1));
+                    back_track.push((doginal_block_number, tx_cursor.0, tx_cursor.1));
                     traversals_cache
-                        .insert((ordinal_block_number, tx_cursor.0), tx_bytes_cursor.clone());
-                    ordinal_offset = sats_out - (sats_in - input.txin_value);
-                    ordinal_block_number = input.block_height;
+                        .insert((doginal_block_number, tx_cursor.0), tx_bytes_cursor.clone());
+                    doginal_offset = sats_out - (sats_in - input.txin_value);
+                    doginal_block_number = input.block_height;
                     tx_cursor = (input.txin, input.vout as usize);
                     break;
                 }
@@ -283,8 +283,8 @@ pub fn compute_koinu_number(
                 );
                 return Ok((
                     TraversalResult {
-                        inscription_number: OrdinalInscriptionNumber::zero(),
-                        ordinal_number: 0,
+                        inscription_number: DoginalInscriptionNumber::zero(),
+                        doginal_number: 0,
                         transfers: 0,
                         inscription_input_index,
                         transaction_identifier_inscription: transaction_identifier.clone(),
@@ -296,13 +296,13 @@ pub fn compute_koinu_number(
         }
     }
 
-    let height = Height(ordinal_block_number);
-    let ordinal_number = height.starting_sat().0 + ordinal_offset;
+    let height = Height(doginal_block_number);
+    let doginal_number = height.starting_sat().0 + doginal_offset;
 
     Ok((
         TraversalResult {
-            inscription_number: OrdinalInscriptionNumber::zero(),
-            ordinal_number,
+            inscription_number: DoginalInscriptionNumber::zero(),
+            doginal_number,
             transfers: hops,
             inscription_input_index,
             transaction_identifier_inscription: transaction_identifier.clone(),
@@ -442,9 +442,10 @@ mod test {
 
     use config::Config;
     use dashmap::DashMap;
+    use dogecoin::types::dogecoin::TxOut;
     use dogecoin::{
         types::{
-            bitcoin::TxOut, BlockIdentifier, TransactionBytesCursor, TransactionIdentifier,
+            BlockIdentifier, TransactionBytesCursor, TransactionIdentifier,
             TransactionInputBytesCursor,
         },
         utils::Context,
@@ -569,7 +570,7 @@ mod test {
             panic!();
         };
 
-        assert_eq!(result.ordinal_number, 1971874375008000);
+        assert_eq!(result.doginal_number, 1971874375008000);
         assert_eq!(result.transfers, 2);
         assert_eq!(
             result.transaction_identifier_inscription.hash,
@@ -637,8 +638,7 @@ mod test {
                         )
                         .add_output(TxOut {
                             value: 10_000,
-                            script_pubkey: "0x76a914fb37342f6275b13936799def06f2eb4c0f20151588ac"
-                                .to_string(),
+                            script_pubkey: "76a914fb37342f6275b13936799def06f2eb4c0f20151588ac".to_string(),
                         })
                         .build(),
                 )
@@ -690,7 +690,7 @@ mod test {
             panic!();
         };
 
-        assert_eq!(result.ordinal_number, 1971874375008000);
+        assert_eq!(result.doginal_number, 1971874375008000);
         assert_eq!(result.transfers, 2);
         assert_eq!(
             result.transaction_identifier_inscription.hash,
@@ -807,7 +807,7 @@ mod test {
             panic!();
         };
 
-        assert_eq!(result.ordinal_number, 1971874375017000);
+        assert_eq!(result.doginal_number, 1971874375017000);
         assert_eq!(result.transfers, 2);
         assert_eq!(
             result.transaction_identifier_inscription.hash,
@@ -865,7 +865,7 @@ mod test {
             panic!();
         };
 
-        assert_eq!(result.ordinal_number, 0);
+        assert_eq!(result.doginal_number, 0);
         assert_eq!(result.transfers, 0);
     }
 
@@ -980,7 +980,7 @@ mod test {
             panic!();
         };
 
-        assert_eq!(result.ordinal_number, 0);
+        assert_eq!(result.doginal_number, 0);
         assert_eq!(result.transfers, 0);
     }
 }

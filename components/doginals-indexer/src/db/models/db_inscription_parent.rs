@@ -1,4 +1,4 @@
-use dogecoin::types::OrdinalInscriptionRevealData;
+use dogecoin::types::DoginalInscriptionRevealData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbInscriptionParent {
@@ -7,7 +7,7 @@ pub struct DbInscriptionParent {
 }
 
 impl DbInscriptionParent {
-    pub fn from_reveal(reveal: &OrdinalInscriptionRevealData) -> Result<Vec<Self>, String> {
+    pub fn from_reveal(reveal: &DoginalInscriptionRevealData) -> Result<Vec<Self>, String> {
         Ok(reveal
             .parents
             .iter()

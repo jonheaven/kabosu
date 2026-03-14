@@ -1,3 +1,4 @@
+use doge_lotto::validate_mint_against_deploy;
 use std::{
     collections::{BTreeMap, HashMap},
     hash::BuildHasherDefault,
@@ -33,7 +34,7 @@ use crate::{
                 ParsedLottoMint,
             },
             inscription_sequencing::{
-                get_dogecoin_network, get_jubilee_block_height,
+                get_jubilee_block_height,
                 parallelize_inscription_data_computations,
                 update_block_inscriptions_with_consensus_sequence_data,
             },
@@ -116,13 +117,13 @@ pub async fn index_block(
 
     // Invalidate and recompute cursor when crossing the jubilee height
     if block.block_identifier.index
-        == get_jubilee_block_height(&get_dogecoin_network(&block.metadata.network))
+        == get_jubilee_block_height(&block.metadata.network)
     {
         sequence_cursor.reset();
     }
 
     {
-        let mut ord_client = pg_pool_client(&pg_pools.ordinals).await?;
+        let mut ord_client = pg_pool_client(&pg_pools.doginals).await?;
         let ord_tx = pg_begin(&mut ord_client).await?;
 
         if let Some(chain_tip) = get_chain_tip_block_height(&ord_tx).await? {
@@ -211,7 +212,7 @@ pub async fn index_block(
             }
         }
 
-        // Measure ordinal computation time
+        // Measure doginal computation time
         let computation_start = std::time::Instant::now();
         let has_inscription_reveals = match parallelize_inscription_data_computations(
             block,
@@ -593,7 +594,7 @@ pub async fn index_block(
                 continue;
             }
 
-            if !crate::core::meta_protocols::lotto::validate_mint_against_deploy(
+            if !validate_mint_against_deploy(
                 &parsed.mint,
                 &deploy,
             ) {
@@ -806,7 +807,7 @@ pub async fn index_block(
         );
 
         if let Err(e) = ord_tx.commit().await {
-            return Err(format!("unable to commit ordinals pg transaction: {}", e));
+            return Err(format!("unable to commit doginals pg transaction: {}", e));
         }
         checkpoint::write_checkpoint(config, block_height)?;
     }
@@ -831,7 +832,7 @@ pub async fn rollback_block(
 ) -> Result<(), String> {
     try_info!(ctx, "Rolling back block #{block_height}");
     {
-        let mut ord_client = pg_pool_client(&pg_pools.ordinals).await?;
+        let mut ord_client = pg_pool_client(&pg_pools.doginals).await?;
         let ord_tx = pg_begin(&mut ord_client).await?;
 
         doginals_pg::rollback_block(block_height, &ord_tx).await?;
@@ -865,7 +866,7 @@ pub async fn rollback_block(
         ord_tx
             .commit()
             .await
-            .map_err(|e| format!("unable to commit ordinals pg transaction: {e}"))?;
+            .map_err(|e| format!("unable to commit doginals pg transaction: {e}"))?;
         try_info!(
             ctx,
             "Rolled back inscription activity at block #{block_height}"
@@ -888,13 +889,13 @@ async fn detect_lotto_burns<T: deadpool_postgres::GenericClient>(
 
     // Query inscriptions transferred TO burn address in this block.
     // `updated_address` and `tx_id` live in `locations`, joined via
-    // (ordinal_number, block_height, tx_index).
+    // (doginal_number, block_height, tx_index).
     let rows = client
         .query(
             "SELECT DISTINCT it.inscription_id, it.block_height, l.tx_id
              FROM inscription_transfers it
              JOIN lotto_tickets lt ON it.inscription_id = lt.inscription_id
-             JOIN locations l ON l.ordinal_number = it.ordinal_number
+             JOIN locations l ON l.doginal_number = it.doginal_number
                               AND l.block_height = it.block_height
                               AND l.tx_index = it.tx_index
              WHERE it.block_height::bigint = $1
@@ -924,7 +925,7 @@ async fn detect_lotto_burns<T: deadpool_postgres::GenericClient>(
                         .query_opt(
                             "SELECT l.address
                              FROM inscription_transfers it
-                             JOIN locations l ON l.ordinal_number = it.ordinal_number
+                             JOIN locations l ON l.doginal_number = it.doginal_number
                                               AND l.block_height = it.block_height
                                               AND l.tx_index = it.tx_index
                              WHERE it.inscription_id = $1

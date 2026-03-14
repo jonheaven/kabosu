@@ -10,15 +10,15 @@ use postgres::pg_connect_with_retry;
 use crate::core::meta_protocols::drc20::drc20_pg;
 
 pub async fn migrate_dbs(config: &Config, ctx: &Context) -> Result<(), String> {
-    let Some(ordinals) = &config.doginals else {
+    let Some(doginals) = &config.doginals else {
         unreachable!()
     };
     {
-        try_info!(ctx, "Running ordinals DB migrations");
-        let mut pg_client = pg_connect_with_retry(&ordinals.db).await;
+        try_info!(ctx, "Running doginals DB migrations");
+        let mut pg_client = pg_connect_with_retry(&doginals.db).await;
         doginals_pg::migrate(&mut pg_client).await?;
     }
-    if let Some(drc20) = config.ordinals_drc20_config() {
+    if let Some(drc20) = config.doginals_drc20_config() {
         try_info!(ctx, "Running drc20 DB migrations");
         let mut pg_client = pg_connect_with_retry(&drc20.db).await;
         drc20_pg::migrate(&mut pg_client).await?;
@@ -27,15 +27,15 @@ pub async fn migrate_dbs(config: &Config, ctx: &Context) -> Result<(), String> {
 }
 
 pub async fn reset_dbs(config: &Config, ctx: &Context) -> Result<(), String> {
-    let Some(ordinals) = &config.doginals else {
+    let Some(doginals) = &config.doginals else {
         unreachable!()
     };
     {
-        try_warn!(ctx, "Resetting ordinals DB");
-        let mut pg_client = pg_connect_with_retry(&ordinals.db).await;
+        try_warn!(ctx, "Resetting doginals DB");
+        let mut pg_client = pg_connect_with_retry(&doginals.db).await;
         pg_reset_db(&mut pg_client).await?;
     }
-    if let Some(drc20) = config.ordinals_drc20_config() {
+    if let Some(drc20) = config.doginals_drc20_config() {
         try_warn!(ctx, "Resetting drc20 DB");
         let mut pg_client = pg_connect_with_retry(&drc20.db).await;
         pg_reset_db(&mut pg_client).await?;

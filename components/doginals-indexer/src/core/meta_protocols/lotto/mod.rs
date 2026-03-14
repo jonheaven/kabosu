@@ -1,1 +1,0 @@
-pub use doge_lotto::*;

@@ -1,6 +1,6 @@
 use dogecoin::types::{
-    BlockIdentifier, OrdinalInscriptionRevealData, OrdinalInscriptionTransferData,
-    OrdinalInscriptionTransferDestination, TransactionIdentifier,
+    BlockIdentifier, DoginalInscriptionRevealData, DoginalInscriptionTransferData,
+    DoginalInscriptionTransferDestination, TransactionIdentifier,
 };
 use postgres::{
     types::{PgBigIntU32, PgNumericU64},
@@ -12,7 +12,7 @@ use crate::core::protocol::koinu_tracking::parse_output_and_offset_from_koinupoi
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbLocation {
-    pub ordinal_number: PgNumericU64,
+    pub doginal_number: PgNumericU64,
     pub block_height: PgNumericU64,
     pub tx_index: PgBigIntU32,
     pub tx_id: String,
@@ -29,7 +29,7 @@ pub struct DbLocation {
 
 impl DbLocation {
     pub fn from_reveal(
-        reveal: &OrdinalInscriptionRevealData,
+        reveal: &DoginalInscriptionRevealData,
         block_identifier: &BlockIdentifier,
         tx_identifier: &TransactionIdentifier,
         tx_index: usize,
@@ -38,7 +38,7 @@ impl DbLocation {
         let (output, offset) =
             parse_output_and_offset_from_koinupoint(&reveal.koinupoint_post_inscription).unwrap();
         DbLocation {
-            ordinal_number: PgNumericU64(reveal.ordinal_number),
+            doginal_number: PgNumericU64(reveal.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             tx_index: PgBigIntU32(tx_index as u32),
             tx_id: tx_identifier.hash[2..].to_string(),
@@ -64,7 +64,7 @@ impl DbLocation {
     }
 
     pub fn from_transfer(
-        transfer: &OrdinalInscriptionTransferData,
+        transfer: &DoginalInscriptionTransferData,
         block_identifier: &BlockIdentifier,
         tx_identifier: &TransactionIdentifier,
         tx_index: usize,
@@ -75,17 +75,17 @@ impl DbLocation {
         let (prev_output, prev_offset) =
             parse_output_and_offset_from_koinupoint(&transfer.koinupoint_pre_transfer).unwrap();
         DbLocation {
-            ordinal_number: PgNumericU64(transfer.ordinal_number),
+            doginal_number: PgNumericU64(transfer.doginal_number),
             block_height: PgNumericU64(block_identifier.index),
             tx_index: PgBigIntU32(tx_index as u32),
             tx_id: tx_identifier.hash[2..].to_string(),
             block_hash: block_identifier.hash[2..].to_string(),
             address: match &transfer.destination {
-                OrdinalInscriptionTransferDestination::Transferred(address) => {
+                DoginalInscriptionTransferDestination::Transferred(address) => {
                     Some(address.clone())
                 }
-                OrdinalInscriptionTransferDestination::SpentInFees => None,
-                OrdinalInscriptionTransferDestination::Burnt(_) => None,
+                DoginalInscriptionTransferDestination::SpentInFees => None,
+                DoginalInscriptionTransferDestination::Burnt(_) => None,
             },
             output,
             offset: offset.map(PgNumericU64),
@@ -93,9 +93,9 @@ impl DbLocation {
             prev_offset: prev_offset.map(PgNumericU64),
             value: transfer.post_transfer_output_value.map(PgNumericU64),
             transfer_type: match transfer.destination {
-                OrdinalInscriptionTransferDestination::Transferred(_) => "transferred".to_string(),
-                OrdinalInscriptionTransferDestination::SpentInFees => "spent_in_fees".to_string(),
-                OrdinalInscriptionTransferDestination::Burnt(_) => "burnt".to_string(),
+                DoginalInscriptionTransferDestination::Transferred(_) => "transferred".to_string(),
+                DoginalInscriptionTransferDestination::SpentInFees => "spent_in_fees".to_string(),
+                DoginalInscriptionTransferDestination::Burnt(_) => "burnt".to_string(),
             },
             timestamp: PgBigIntU32(timestamp),
         }
@@ -105,7 +105,7 @@ impl DbLocation {
 impl FromPgRow for DbLocation {
     fn from_pg_row(row: &Row) -> Self {
         DbLocation {
-            ordinal_number: row.get("ordinal_number"),
+            doginal_number: row.get("doginal_number"),
             block_height: row.get("block_height"),
             tx_index: row.get("tx_index"),
             tx_id: row.get("tx_id"),

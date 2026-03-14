@@ -1,22 +1,15 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    vec,
-};
-
-use bitcoin::ScriptBuf;
+use std::collections::{HashMap, VecDeque};
 use dogecoin::{try_debug, try_warn, utils::Context};
-use doginals_parser::{Cenotaph, Dune, DuneId, Edict, Etching};
+use crate::db::DbLedgerEntry;
+use crate::db::models::db_ledger_operation::DbLedgerOperation;
+use crate::db::models::db_dune::DbDune;
+use crate::db::cache::input_dune_balance::InputDuneBalance;
+use crate::db::cache::transaction_location::TransactionLocation;
+use crate::db::cache::utils::{is_dune_mintable, move_dune_balance_to_output, new_sequential_ledger_entry};
+use doginals_parser::{Etching, Dune, Edict};
+use bitcoin::ScriptBuf;
+use doginals_parser::DuneId;
 
-use super::{
-    input_rune_balance::InputRuneBalance, transaction_location::TransactionLocation,
-    utils::move_rune_balance_to_output,
-};
-use crate::db::{
-    cache::utils::{is_rune_mintable, new_sequential_ledger_entry},
-    models::{
-        db_ledger_entry::DbLedgerEntry, db_ledger_operation::DbLedgerOperation, db_rune::DbDune,
-    },
-};
 
 /// Holds cached data relevant to a single transaction during indexing.
 pub struct TransactionCache {
@@ -26,12 +19,12 @@ pub struct TransactionCache {
     next_event_index: u32,
     /// Dune etched during this transaction, if any.
     pub etching: Option<DbDune>,
-    /// The output where all unallocated runes will be transferred to. Set to the first eligible output by default but can be
+    /// The output where all unallocated dunes will be transferred to. Set to the first eligible output by default but can be
     /// overridden by a Dunestone.
     pub output_pointer: Option<u32>,
-    /// Holds input runes for the current transaction (input to this tx, premined or minted). Balances in the vector are in the
+    /// Holds input dunes for the current transaction (input to this tx, premined or minted). Balances in the vector are in the
     /// order in which they were input to this transaction.
-    pub input_runes: HashMap<DuneId, VecDeque<InputRuneBalance>>,
+    pub input_dunes: HashMap<DuneId, VecDeque<InputDuneBalance>>,
     /// Non-OP_RETURN outputs in this transaction
     eligible_outputs: HashMap<u32, ScriptBuf>,
     /// Total outputs contained in this transaction, including non-eligible outputs.
@@ -41,7 +34,7 @@ pub struct TransactionCache {
 impl TransactionCache {
     pub fn new(
         location: TransactionLocation,
-        input_runes: HashMap<DuneId, VecDeque<InputRuneBalance>>,
+        input_dunes: HashMap<DuneId, VecDeque<InputDuneBalance>>,
         eligible_outputs: HashMap<u32, ScriptBuf>,
         first_eligible_output: Option<u32>,
         total_outputs: u32,
@@ -51,7 +44,7 @@ impl TransactionCache {
             next_event_index: 0,
             etching: None,
             output_pointer: first_eligible_output,
-            input_runes,
+            input_dunes,
             eligible_outputs,
             total_outputs,
         }
@@ -64,21 +57,21 @@ impl TransactionCache {
             next_event_index: 0,
             etching: None,
             output_pointer: None,
-            input_runes: maplit::hashmap! {},
+            input_dunes: maplit::hashmap! {},
             eligible_outputs: maplit::hashmap! {},
             total_outputs: 0,
         }
     }
 
-    /// Burns the rune balances input to this transaction.
-    pub fn apply_cenotaph_input_burn(&mut self, _cenotaph: &Cenotaph) -> Vec<DbLedgerEntry> {
+    /// Burns the dune balances input to this transaction.
+    pub fn apply_cenotaph_input_burn(&mut self, _cenotaph: &doginals_parser::Cenotaph) -> Vec<DbLedgerEntry> {
         let mut results = vec![];
-        for (rune_id, unallocated) in self.input_runes.iter() {
+        for (dune_id, unallocated) in self.input_dunes.iter() {
             for balance in unallocated {
                 results.push(new_sequential_ledger_entry(
                     &self.location,
                     Some(balance.amount),
-                    *rune_id,
+                    *dune_id,
                     None,
                     balance.address.as_ref(),
                     None,
@@ -87,30 +80,30 @@ impl TransactionCache {
                 ));
             }
         }
-        self.input_runes.clear();
+        self.input_dunes.clear();
         results
     }
 
-    /// Moves remaining input runes to the correct output depending on runestone configuration. Must be called once the processing
+    /// Moves remaining input dunes to the correct output depending on dunestone configuration. Must be called once the processing
     /// for a transaction is complete.
     pub fn allocate_remaining_balances(&mut self, ctx: &Context) -> Vec<DbLedgerEntry> {
         let mut results = vec![];
-        for (rune_id, unallocated) in self.input_runes.iter_mut() {
+        for (dune_id, unallocated) in self.input_dunes.iter_mut() {
             #[cfg(not(feature = "release"))]
             for input in unallocated.iter() {
                 try_debug!(
                     ctx,
-                    "Assign unallocated {rune_id} to pointer {output_pointer:?} {address:?} ({amount}) {location}",
+                    "Assign unallocated {dune_id} to pointer {output_pointer:?} {address:?} ({balance}) {location}",
                     output_pointer = self.output_pointer,
                     address = &input.address,
-                    amount = input.amount,
+                    balance = input.balance,
                     location = self.location.to_string()
                 );
             }
-            results.extend(move_rune_balance_to_output(
+            results.extend(move_dune_balance_to_output(
                 &self.location,
                 self.output_pointer,
-                rune_id,
+                dune_id,
                 unallocated,
                 &self.eligible_outputs,
                 0, // All of it
@@ -118,7 +111,7 @@ impl TransactionCache {
                 ctx,
             ));
         }
-        self.input_runes.clear();
+        self.input_dunes.clear();
         results
     }
 
@@ -127,14 +120,14 @@ impl TransactionCache {
         etching: &Etching,
         number: u32,
     ) -> (DuneId, DbDune, DbLedgerEntry) {
-        let rune_id = self.location.rune_id();
-        let db_rune = DbDune::from_etching(etching, number, &self.location);
-        self.etching = Some(db_rune.clone());
-        // Move pre-mined balance to input runes.
+        let dune_id = self.location.dune_id();
+        let db_dune = DbDune::from_etching(etching, number, &self.location);
+        self.etching = Some(db_dune.clone());
+        // Move pre-mined balance to input dunes.
         if let Some(premine) = etching.premine {
-            self.add_input_runes(
-                &rune_id,
-                InputRuneBalance {
+            self.add_input_dunes(
+                &dune_id,
+                InputDuneBalance {
                     address: None,
                     amount: premine,
                 },
@@ -143,64 +136,64 @@ impl TransactionCache {
         let entry = new_sequential_ledger_entry(
             &self.location,
             None,
-            rune_id,
+            dune_id,
             None,
             None,
             None,
             DbLedgerOperation::Etching,
             &mut self.next_event_index,
         );
-        (rune_id, db_rune, entry)
+        (dune_id, db_dune, entry)
     }
 
     pub fn apply_cenotaph_etching(
         &mut self,
-        rune: &Dune,
+        dune: &Dune,
         number: u32,
     ) -> (DuneId, DbDune, DbLedgerEntry) {
-        let rune_id = self.location.rune_id();
-        // If the runestone that produced the cenotaph contained an etching, the etched rune has supply zero and is unmintable.
-        let db_rune = DbDune::from_cenotaph_etching(rune, number, &self.location);
-        self.etching = Some(db_rune.clone());
+        let dune_id = self.location.dune_id();
+        // If the dunestone that produced the cenotaph contained an etching, the etched dune has supply zero and is unmintable.
+        let db_dune = DbDune::from_cenotaph_etching(dune, number, &self.location);
+        self.etching = Some(db_dune.clone());
         let entry = new_sequential_ledger_entry(
             &self.location,
             None,
-            rune_id,
+            dune_id,
             None,
             None,
             None,
             DbLedgerOperation::Etching,
             &mut self.next_event_index,
         );
-        (rune_id, db_rune, entry)
+        (dune_id, db_dune, entry)
     }
 
     pub fn apply_mint(
         &mut self,
-        rune_id: &DuneId,
+        dune_id: &DuneId,
         total_mints: u128,
-        db_rune: &DbDune,
+        db_dune: &DbDune,
         ctx: &Context,
     ) -> Option<DbLedgerEntry> {
-        if !is_rune_mintable(db_rune, total_mints, &self.location) {
+        if !is_dune_mintable(db_dune, total_mints, &self.location) {
             try_debug!(
                 ctx,
-                "Invalid mint {rune_id} {location}",
+                "Invalid mint {dune_id} {location}",
                 location = self.location.to_string()
             );
             return None;
         }
-        let terms_amount = db_rune.terms_amount.unwrap();
+        let terms_amount = db_dune.terms_amount.unwrap();
         try_debug!(
             ctx,
-            "MINT {rune_id} ({spaced_name}) {amount} {location}",
-            spaced_name = &db_rune.spaced_name,
+            "MINT {dune_id} ({spaced_name}) {amount} {location}",
+            spaced_name = &db_dune.spaced_name,
             amount = terms_amount.0,
             location = self.location.to_string()
         );
-        self.add_input_runes(
-            rune_id,
-            InputRuneBalance {
+        self.add_input_dunes(
+            dune_id,
+            InputDuneBalance {
                 address: None,
                 amount: terms_amount.0,
             },
@@ -208,7 +201,7 @@ impl TransactionCache {
         Some(new_sequential_ledger_entry(
             &self.location,
             Some(terms_amount.0),
-            *rune_id,
+            *dune_id,
             None,
             None,
             None,
@@ -219,32 +212,32 @@ impl TransactionCache {
 
     pub fn apply_cenotaph_mint(
         &mut self,
-        rune_id: &DuneId,
+        dune_id: &DuneId,
         total_mints: u128,
-        db_rune: &DbDune,
+        db_dune: &DbDune,
         ctx: &Context,
     ) -> Option<DbLedgerEntry> {
-        if !is_rune_mintable(db_rune, total_mints, &self.location) {
+        if !is_dune_mintable(db_dune, total_mints, &self.location) {
             try_debug!(
                 ctx,
-                "Invalid mint {rune_id} {location}",
+                "Invalid mint {dune_id} {location}",
                 location = self.location.to_string()
             );
             return None;
         }
-        let terms_amount = db_rune.terms_amount.unwrap();
+        let terms_amount = db_dune.terms_amount.unwrap();
         try_debug!(
             ctx,
             "CENOTAPH MINT {spaced_name} {amount} {location}",
-            spaced_name = &db_rune.spaced_name,
+            spaced_name = &db_dune.spaced_name,
             amount = terms_amount.0,
             location = self.location.to_string()
         );
-        // This entry does not go in the input runes, it gets burned immediately.
+        // This entry does not go in the input dunes, it gets burned immediately.
         Some(new_sequential_ledger_entry(
             &self.location,
             Some(terms_amount.0),
-            *rune_id,
+            *dune_id,
             None,
             None,
             None,
@@ -254,25 +247,25 @@ impl TransactionCache {
     }
 
     pub fn apply_edict(&mut self, edict: &Edict, ctx: &Context) -> Vec<DbLedgerEntry> {
-        // Find this rune.
-        let rune_id = if edict.id.block == 0 && edict.id.tx == 0 {
+        // Find this dune.
+        let dune_id = if edict.id.block == 0 && edict.id.tx == 0 {
             let Some(etching) = self.etching.as_ref() else {
                 try_warn!(
                     ctx,
-                    "Attempted edict for nonexistent rune 0:0 {location}",
+                    "Attempted edict for nonexistent dune 0:0 {location}",
                     location = self.location.to_string()
                 );
                 return vec![];
             };
-            etching.rune_id()
+            etching.dune_id()
         } else {
             edict.id
         };
-        // Take all the available inputs for the rune we're trying to move.
-        let Some(available_inputs) = self.input_runes.get_mut(&rune_id) else {
+        // Take all the available inputs for the dune we're trying to move.
+        let Some(available_inputs) = self.input_dunes.get_mut(&dune_id) else {
             try_debug!(
                 ctx,
-                "No unallocated runes {id} remain for edict {location}",
+                "No unallocated dunes {id} remain for edict {location}",
                 id = edict.id.to_string(),
                 location = self.location.to_string()
             );
@@ -290,14 +283,14 @@ impl TransactionCache {
             // No eligible outputs means burn.
             try_debug!(
                 ctx,
-                "No eligible outputs for edict on rune {id} {location}",
+                "No eligible outputs for edict on dune {id} {location}",
                 id = edict.id.to_string(),
                 location = self.location.to_string()
             );
-            results.extend(move_rune_balance_to_output(
+            results.extend(move_dune_balance_to_output(
                 &self.location,
                 None, // This will force a burn.
-                &rune_id,
+                &dune_id,
                 available_inputs,
                 &self.eligible_outputs,
                 edict.amount,
@@ -306,15 +299,15 @@ impl TransactionCache {
             ));
         } else {
             match edict.output {
-                // An edict with output equal to the number of transaction outputs allocates `amount` runes to each non-OP_RETURN
+                // An edict with output equal to the number of transaction outputs allocates `amount` dunes to each non-OP_RETURN
                 // output in order.
                 output if output == self.total_outputs => {
                     let mut output_keys: Vec<u32> = self.eligible_outputs.keys().cloned().collect();
                     output_keys.sort();
                     if edict.amount == 0 {
-                        // Divide equally. If the number of unallocated runes is not divisible by the number of non-OP_RETURN outputs,
-                        // 1 additional rune is assigned to the first R non-OP_RETURN outputs, where R is the remainder after dividing
-                        // the balance of unallocated units of rune id by the number of non-OP_RETURN outputs.
+                        // Divide equally. If the number of unallocated dunes is not divisible by the number of non-OP_RETURN outputs,
+                        // 1 additional dune is assigned to the first R non-OP_RETURN outputs, where R is the remainder after dividing
+                        // the balance of unallocated units of dune id by the number of non-OP_RETURN outputs.
                         let len = self.eligible_outputs.len() as u128;
                         let per_output = unallocated / len;
                         let mut remainder = unallocated % len;
@@ -324,10 +317,10 @@ impl TransactionCache {
                                 extra = 1;
                                 remainder -= 1;
                             }
-                            results.extend(move_rune_balance_to_output(
+                            results.extend(move_dune_balance_to_output(
                                 &self.location,
                                 Some(output),
-                                &rune_id,
+                                &dune_id,
                                 available_inputs,
                                 &self.eligible_outputs,
                                 per_output + extra,
@@ -339,10 +332,10 @@ impl TransactionCache {
                         // Give `amount` to all outputs or until unallocated runs out.
                         for output in output_keys {
                             let amount = edict.amount.min(unallocated);
-                            results.extend(move_rune_balance_to_output(
+                            results.extend(move_dune_balance_to_output(
                                 &self.location,
                                 Some(output),
-                                &rune_id,
+                                &dune_id,
                                 available_inputs,
                                 &self.eligible_outputs,
                                 amount,
@@ -358,10 +351,10 @@ impl TransactionCache {
                     if edict.amount == 0 {
                         amount = unallocated;
                     }
-                    results.extend(move_rune_balance_to_output(
+                    results.extend(move_dune_balance_to_output(
                         &self.location,
                         Some(edict.output),
-                        &rune_id,
+                        &dune_id,
                         available_inputs,
                         &self.eligible_outputs,
                         amount,
@@ -377,10 +370,10 @@ impl TransactionCache {
                         output = edict.output,
                         location = self.location.to_string()
                     );
-                    results.extend(move_rune_balance_to_output(
+                    results.extend(move_dune_balance_to_output(
                         &self.location,
                         None, // Burn.
-                        &rune_id,
+                        &dune_id,
                         available_inputs,
                         &self.eligible_outputs,
                         edict.amount,
@@ -393,43 +386,44 @@ impl TransactionCache {
         results
     }
 
-    fn add_input_runes(&mut self, rune_id: &DuneId, entry: InputRuneBalance) {
-        if let Some(balance) = self.input_runes.get_mut(rune_id) {
+    fn add_input_dunes(&mut self, dune_id: &DuneId, entry: InputDuneBalance) {
+        if let Some(balance) = self.input_dunes.get_mut(dune_id) {
             balance.push_back(entry);
         } else {
             let mut vec = VecDeque::new();
             vec.push_back(entry);
-            self.input_runes.insert(*rune_id, vec);
+            self.input_dunes.insert(*dune_id, vec);
         }
     }
+
 }
+// End of impl TransactionCache
 
 #[cfg(test)]
 mod test {
     use std::collections::VecDeque;
-
     use bitcoin::ScriptBuf;
     use dogecoin::utils::Context;
-    use doginals_parser::{Dune, Edict, Etching, Terms};
+    use doginals_parser::{Dune, Edict, Etching, Cenotaph, Terms};
     use maplit::hashmap;
 
     use super::TransactionCache;
     use crate::db::{
         cache::{
-            input_rune_balance::InputRuneBalance, transaction_location::TransactionLocation,
-            utils::is_rune_mintable,
+            input_dune_balance::InputDuneBalance, transaction_location::TransactionLocation,
+            utils::is_dune_mintable,
         },
-        models::{db_ledger_operation::DbLedgerOperation, db_rune::DbDune},
+        models::{db_ledger_operation::DbLedgerOperation, db_dune::DbDune},
     };
 
     #[test]
-    fn etches_rune() {
+    fn etches_dune() {
         let location = TransactionLocation::dummy();
         let mut cache = TransactionCache::empty(location.clone());
         let etching = Etching {
             divisibility: Some(2),
             premine: Some(1000),
-            rune: Some(Dune::reserved(location.block_height, location.tx_index)),
+            dune: Some(Dune::reserved(location.block_height, location.tx_index)),
             spacers: None,
             symbol: Some('x'),
             terms: Some(Terms {
@@ -440,26 +434,23 @@ mod test {
             }),
             turbo: true,
         };
-        let (rune_id, db_rune, db_ledger_entry) = cache.apply_etching(&etching, 1);
+        let (dune_id, db_dune, db_ledger_entry) = cache.apply_etching(&etching, 1);
 
-        assert_eq!(rune_id.block, 840000);
-        assert_eq!(rune_id.tx, 0);
-        assert_eq!(db_rune.id, "840000:0");
-        assert_eq!(db_rune.name, "AAAAAAAAAAAAAAAAZOMJMODBYFG");
-        assert_eq!(db_rune.number.0, 1);
+        assert_eq!(dune_id.block, 840000);
+        assert_eq!(dune_id.tx, 0);
+        assert_eq!(db_dune.id, "840000:0");
+        assert_eq!(db_dune.name, "AAAAAAAAAAAAAAAAZOMJMODBYFG");
+        assert_eq!(db_dune.number.0, 1);
         assert_eq!(db_ledger_entry.operation, DbLedgerOperation::Etching);
-        assert_eq!(db_ledger_entry.rune_id, "840000:0");
-    }
-
+        assert_eq!(db_ledger_entry.dune_id, "840000:0");
     #[test]
-    fn etches_rune_with_omitted_name_generates_reserved() {
+    fn test_apply_etching_reserved_dune() {
         let location = TransactionLocation::dummy();
         let mut cache = TransactionCache::empty(location.clone());
         let etching = Etching {
             divisibility: Some(2),
             premine: Some(1000),
-            rune: None, // Omitted name → should allocate reserved rune
-            spacers: None,
+            dune: None, // Omitted name → should allocate reserved dune
             symbol: Some('x'),
             terms: Some(Terms {
                 amount: Some(1000),
@@ -470,64 +461,64 @@ mod test {
             turbo: true,
         };
 
-        let (_rune_id, db_rune, db_ledger_entry) = cache.apply_etching(&etching, 1);
-
-        // Expected reserved rune string for this location
+        let (_dune_id, db_dune, db_ledger_entry) = cache.apply_etching(&etching, 1);
+        // Expected reserved dune string for this location
         let expected_reserved_name =
             Dune::reserved(location.block_height, location.tx_index).to_string();
 
-        assert_eq!(db_rune.name, expected_reserved_name);
+        assert_eq!(db_dune.name, expected_reserved_name);
         assert_eq!(db_ledger_entry.operation, DbLedgerOperation::Etching);
+    }
     }
 
     #[test]
     // TODO add cenotaph field to DbDune before filling this in
-    fn etches_cenotaph_rune() {
+    fn etches_cenotaph_dune() {
         let location = TransactionLocation::dummy();
         let mut cache = TransactionCache::empty(location.clone());
 
-        // Create a cenotaph rune
-        let rune = Dune::reserved(location.block_height, location.tx_index);
+        // Create a cenotaph dune
+        let dune = Dune::reserved(location.block_height, location.tx_index);
         let number = 2;
 
-        let (_rune_id, db_rune, db_ledger_entry) = cache.apply_cenotaph_etching(&rune, number);
+        let (_dune_id, db_dune, db_ledger_entry) = cache.apply_cenotaph_etching(&dune, number);
 
-        // // the etched rune has supply zero and is unmintable.
-        assert_eq!(is_rune_mintable(&db_rune, 0, &location), false);
+        // // the etched dune has supply zero and is unmintable.
+        assert_eq!(is_dune_mintable(&db_dune, 0, &location), false);
         assert_eq!(db_ledger_entry.amount, None);
-        assert_eq!(db_rune.id, "840000:0");
+        assert_eq!(db_dune.id, "840000:0");
         assert_eq!(db_ledger_entry.operation, DbLedgerOperation::Etching);
-        assert_eq!(db_ledger_entry.rune_id, "840000:0");
+        assert_eq!(db_ledger_entry.dune_id, "840000:0");
     }
 
     #[test]
-    fn mints_rune() {
+    fn mints_dune() {
         let location = TransactionLocation::dummy();
         let mut cache = TransactionCache::empty(location.clone());
-        let db_rune = &DbDune::factory();
-        let rune_id = &db_rune.rune_id();
+        let db_dune = &DbDune::factory();
+        let dune_id = &db_dune.dune_id();
 
-        let ledger_entry = cache.apply_mint(&rune_id, 0, &db_rune, &Context::empty());
+        let ledger_entry = cache.apply_mint(&dune_id, 0, &db_dune, &Context::empty());
 
         assert!(ledger_entry.is_some());
         let ledger_entry = ledger_entry.unwrap();
         assert_eq!(ledger_entry.operation, DbLedgerOperation::Mint);
-        assert_eq!(ledger_entry.rune_id, rune_id.to_string());
+        assert_eq!(ledger_entry.dune_id, dune_id.to_string());
         // ledger entry is minted with the correct amount
-        assert_eq!(ledger_entry.amount, Some(db_rune.terms_amount.unwrap()));
+        assert_eq!(ledger_entry.amount, Some(db_dune.terms_amount.unwrap()));
 
-        // minted amount is added to the input runes (`cache.input_runes`)
-        assert!(cache.input_runes.contains_key(&rune_id));
+        // minted amount is added to the input dunes (`cache.input_dunes`)
+        assert!(cache.input_dunes.contains_key(&dune_id));
     }
 
     #[test]
-    fn does_not_mint_fully_minted_rune() {
+    fn does_not_mint_fully_minted_dune() {
         let location = TransactionLocation::dummy();
         let mut cache = TransactionCache::empty(location.clone());
         let etching = Etching {
             divisibility: Some(2),
             premine: Some(1000),
-            rune: Some(Dune::reserved(location.block_height, location.tx_index)),
+            dune: Some(Dune::reserved(location.block_height, location.tx_index)),
             spacers: None,
             symbol: Some('x'),
             terms: Some(Terms {
@@ -538,8 +529,8 @@ mod test {
             }),
             turbo: true,
         };
-        let (rune_id, db_rune, _db_ledger_entry) = cache.apply_etching(&etching, 1);
-        let ledger_entry = cache.apply_mint(&rune_id, 1000, &db_rune, &Context::empty());
+        let (dune_id, db_dune, _db_ledger_entry) = cache.apply_etching(&etching, 1);
+        let ledger_entry = cache.apply_mint(&dune_id, 1000, &db_dune, &Context::empty());
         assert!(ledger_entry.is_none());
     }
 
@@ -548,40 +539,40 @@ mod test {
         let location = TransactionLocation::dummy();
         let mut cache = TransactionCache::empty(location.clone());
 
-        let db_rune = DbDune::factory();
-        let rune_id = db_rune.rune_id();
-        let ledger_entry = cache.apply_cenotaph_mint(&rune_id, 0, &db_rune, &Context::empty());
+        let db_dune = DbDune::factory();
+        let dune_id = db_dune.dune_id();
+        let ledger_entry = cache.apply_cenotaph_mint(&dune_id, 0, &db_dune, &Context::empty());
         assert!(ledger_entry.is_some());
         let ledger_entry = ledger_entry.unwrap();
         assert_eq!(ledger_entry.operation, DbLedgerOperation::Burn);
         assert_eq!(
             ledger_entry.amount.unwrap().0,
-            db_rune.terms_amount.unwrap().0
+            db_dune.terms_amount.unwrap().0
         );
     }
 
     #[test]
-    fn moves_runes_with_edict() {
+    fn moves_dunes_with_edict() {
         let location = TransactionLocation::dummy();
-        let db_rune = &DbDune::factory();
-        let rune_id = &db_rune.rune_id();
+        let db_dune = &DbDune::factory();
+        let dune_id = &db_dune.dune_id();
         let mut balances = VecDeque::new();
         let sender_address =
             "bc1p3v7r3n4hv63z4s7jkhdzxsay9xem98hxul057w2mwur406zhw8xqrpwp9w".to_string();
         let receiver_address =
             "bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string();
-        balances.push_back(InputRuneBalance {
+        balances.push_back(InputDuneBalance {
             address: Some(sender_address.clone()),
             amount: 1000,
         });
-        let input_runes = hashmap! {
-            rune_id.clone() => balances
+        let input_dunes = hashmap! {
+            dune_id.clone() => balances
         };
         let eligible_outputs = hashmap! {0=> ScriptBuf::from_hex("5120388dfba1b0069bbb0ad5eef62c1a94c46e91a3454accf40bf34b80f75e2708db").unwrap()};
-        let mut cache = TransactionCache::new(location, input_runes, eligible_outputs, Some(0), 1);
+        let mut cache = TransactionCache::new(location, input_dunes, eligible_outputs, Some(0), 1);
 
         let edict = Edict {
-            id: rune_id.clone(),
+            id: dune_id.clone(),
             amount: 1000,
             output: 0,
         };
@@ -598,24 +589,24 @@ mod test {
     }
 
     #[test]
-    fn allocates_remaining_runes_to_first_eligible_output() {
+    fn allocates_remaining_dunes_to_first_eligible_output() {
         let location = TransactionLocation::dummy();
-        let db_rune = &DbDune::factory();
-        let rune_id = &db_rune.rune_id();
+        let db_dune = &DbDune::factory();
+        let dune_id = &db_dune.dune_id();
         let mut balances = VecDeque::new();
         let sender_address =
             "bc1p3v7r3n4hv63z4s7jkhdzxsay9xem98hxul057w2mwur406zhw8xqrpwp9w".to_string();
         let receiver_address =
             "bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string();
-        balances.push_back(InputRuneBalance {
+        balances.push_back(InputDuneBalance {
             address: Some(sender_address.clone()),
             amount: 1000,
         });
-        let input_runes = hashmap! {
-            rune_id.clone() => balances
+        let input_dunes = hashmap! {
+            dune_id.clone() => balances
         };
         let eligible_outputs = hashmap! {0=> ScriptBuf::from_hex("5120388dfba1b0069bbb0ad5eef62c1a94c46e91a3454accf40bf34b80f75e2708db").unwrap()};
-        let mut cache = TransactionCache::new(location, input_runes, eligible_outputs, Some(0), 1);
+        let mut cache = TransactionCache::new(location, input_dunes, eligible_outputs, Some(0), 1);
         let ledger_entry = cache.allocate_remaining_balances(&Context::empty());
 
         assert_eq!(ledger_entry.len(), 2);
@@ -629,24 +620,24 @@ mod test {
     }
 
     #[test]
-    fn allocates_remaining_runes_to_runestone_pointer_output() {
+    fn allocates_remaining_dunes_to_dunestone_pointer_output() {
         let location = TransactionLocation::dummy();
-        let db_rune = &DbDune::factory();
-        let rune_id = &db_rune.rune_id();
+        let db_dune = &DbDune::factory();
+        let dune_id = &db_dune.dune_id();
         let mut balances = VecDeque::new();
         let sender_address =
             "bc1p3v7r3n4hv63z4s7jkhdzxsay9xem98hxul057w2mwur406zhw8xqrpwp9w".to_string();
         let receiver_address =
             "bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string();
-        balances.push_back(InputRuneBalance {
+        balances.push_back(InputDuneBalance {
             address: Some(sender_address.clone()),
             amount: 1000,
         });
-        let input_runes = hashmap! {
-            rune_id.clone() => balances
+        let input_dunes = hashmap! {
+            dune_id.clone() => balances
         };
         let eligible_outputs = hashmap! {1=> ScriptBuf::from_hex("5120388dfba1b0069bbb0ad5eef62c1a94c46e91a3454accf40bf34b80f75e2708db").unwrap()};
-        let mut cache = TransactionCache::new(location, input_runes, eligible_outputs, Some(0), 2);
+        let mut cache = TransactionCache::new(location, input_dunes, eligible_outputs, Some(0), 2);
         cache.output_pointer = Some(1);
         let ledger_entry = cache.allocate_remaining_balances(&Context::empty());
 

@@ -1,6 +1,6 @@
 CREATE TABLE inscriptions (
     inscription_id TEXT NOT NULL PRIMARY KEY,
-    ordinal_number NUMERIC NOT NULL,
+    doginal_number NUMERIC NOT NULL,
     number BIGINT NOT NULL UNIQUE,
     classic_number BIGINT NOT NULL UNIQUE,
     block_height NUMERIC NOT NULL,
@@ -27,4 +27,4 @@ CREATE INDEX inscriptions_mime_type_index ON inscriptions (mime_type);
 CREATE INDEX inscriptions_recursive_index ON inscriptions (recursive);
 CREATE INDEX inscriptions_block_height_tx_index_index ON inscriptions (block_height DESC, tx_index DESC);
 CREATE INDEX inscriptions_address_index ON inscriptions (address);
-CREATE INDEX inscriptions_ordinal_number_index ON inscriptions (ordinal_number);
+CREATE INDEX inscriptions_doginal_number_index ON inscriptions (doginal_number);

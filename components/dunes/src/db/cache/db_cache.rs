@@ -5,7 +5,7 @@ use tokio_postgres::Transaction;
 
 use crate::db::{
     models::{
-        db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry, db_rune::DbDune,
+        db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry, db_dune::DbDune,
         db_supply_change::DbSupplyChange,
     },
     pg_insert_balance_changes, pg_insert_dunes, pg_insert_ledger_entries, pg_insert_supply_changes,
@@ -13,7 +13,7 @@ use crate::db::{
 
 /// Holds rows that have yet to be inserted into the database.
 pub struct DbCache {
-    pub runes: Vec<DbDune>,
+    pub dunes: Vec<DbDune>,
     pub ledger_entries: Vec<DbLedgerEntry>,
     pub supply_changes: HashMap<String, DbSupplyChange>,
     pub balance_increases: HashMap<(String, String), DbBalanceChange>,
@@ -29,7 +29,7 @@ impl Default for DbCache {
 impl DbCache {
     pub fn new() -> Self {
         DbCache {
-            runes: Vec::new(),
+            dunes: Vec::new(),
             ledger_entries: Vec::new(),
             supply_changes: HashMap::new(),
             balance_increases: HashMap::new(),
@@ -40,10 +40,10 @@ impl DbCache {
     /// Insert all data into the DB and clear cache.
     pub async fn flush(&mut self, db_tx: &mut Transaction<'_>, ctx: &Context) {
         try_debug!(ctx, "Flushing DB cache...");
-        if !self.runes.is_empty() {
-            try_debug!(ctx, "Flushing {} runes", self.runes.len());
-            let _ = pg_insert_dunes(&self.runes, db_tx, ctx).await;
-            self.runes.clear();
+        if !self.dunes.is_empty() {
+            try_debug!(ctx, "Flushing {} dunes", self.dunes.len());
+            let _ = pg_insert_dunes(&self.dunes, db_tx, ctx).await;
+            self.dunes.clear();
         }
         if !self.supply_changes.is_empty() {
             try_debug!(ctx, "Flushing {} supply changes", self.supply_changes.len());

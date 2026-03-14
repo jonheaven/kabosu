@@ -14,7 +14,7 @@ pub struct TransactionLocation {
 }
 
 impl TransactionLocation {
-    pub fn rune_id(&self) -> DuneId {
+    pub fn dune_id(&self) -> DuneId {
         DuneId {
             block: self.block_height,
             tx: self.tx_index,

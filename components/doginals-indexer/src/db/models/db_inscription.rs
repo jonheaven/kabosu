@@ -1,5 +1,5 @@
 use dogecoin::types::{
-    BlockIdentifier, OrdinalInscriptionCurseType, OrdinalInscriptionRevealData,
+    BlockIdentifier, DoginalInscriptionCurseType, DoginalInscriptionRevealData,
     TransactionIdentifier,
 };
 use postgres::{
@@ -11,7 +11,7 @@ use tokio_postgres::Row;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbInscription {
     pub inscription_id: String,
-    pub ordinal_number: PgNumericU64,
+    pub doginal_number: PgNumericU64,
     pub number: i64,
     pub classic_number: i64,
     pub block_height: PgNumericU64,
@@ -38,7 +38,7 @@ pub struct DbInscription {
 
 impl DbInscription {
     pub fn from_reveal(
-        reveal: &OrdinalInscriptionRevealData,
+        reveal: &DoginalInscriptionRevealData,
         block_identifier: &BlockIdentifier,
         tx_identifier: &TransactionIdentifier,
         tx_index: usize,
@@ -50,7 +50,7 @@ impl DbInscription {
         let content_type = String::from_utf8(content_type_bytes).unwrap();
         DbInscription {
             inscription_id: reveal.inscription_id.clone(),
-            ordinal_number: PgNumericU64(reveal.ordinal_number),
+            doginal_number: PgNumericU64(reveal.doginal_number),
             number: reveal.inscription_number.jubilee,
             classic_number: reveal.inscription_number.classic,
             block_height: PgNumericU64(block_identifier.index),
@@ -64,18 +64,18 @@ impl DbInscription {
             content: hex::decode(&reveal.content_bytes[2..]).unwrap(),
             fee: PgNumericU64(reveal.inscription_fee),
             curse_type: reveal.curse_type.as_ref().map(|c| match c {
-                OrdinalInscriptionCurseType::DuplicateField => "duplicate_field".to_string(),
-                OrdinalInscriptionCurseType::IncompleteField => "incomplete_field".to_string(),
-                OrdinalInscriptionCurseType::NotAtOffsetZero => "not_at_offset_zero".to_string(),
-                OrdinalInscriptionCurseType::NotInFirstInput => "not_in_first_input".to_string(),
-                OrdinalInscriptionCurseType::Pointer => "pointer".to_string(),
-                OrdinalInscriptionCurseType::Pushnum => "pushnum".to_string(),
-                OrdinalInscriptionCurseType::Reinscription => "reinscription".to_string(),
-                OrdinalInscriptionCurseType::Stutter => "stutter".to_string(),
-                OrdinalInscriptionCurseType::UnrecognizedEvenField => {
+                DoginalInscriptionCurseType::DuplicateField => "duplicate_field".to_string(),
+                DoginalInscriptionCurseType::IncompleteField => "incomplete_field".to_string(),
+                DoginalInscriptionCurseType::NotAtOffsetZero => "not_at_offset_zero".to_string(),
+                DoginalInscriptionCurseType::NotInFirstInput => "not_in_first_input".to_string(),
+                DoginalInscriptionCurseType::Pointer => "pointer".to_string(),
+                DoginalInscriptionCurseType::Pushnum => "pushnum".to_string(),
+                DoginalInscriptionCurseType::Reinscription => "reinscription".to_string(),
+                DoginalInscriptionCurseType::Stutter => "stutter".to_string(),
+                DoginalInscriptionCurseType::UnrecognizedEvenField => {
                     "unrecognized_field".to_string()
                 }
-                OrdinalInscriptionCurseType::Generic => "generic".to_string(),
+                DoginalInscriptionCurseType::Generic => "generic".to_string(),
             }),
             recursive: false, // This will be determined later
             input_index: PgBigIntU32(reveal.inscription_input_index as u32),
@@ -94,7 +94,7 @@ impl FromPgRow for DbInscription {
     fn from_pg_row(row: &Row) -> Self {
         DbInscription {
             inscription_id: row.get("inscription_id"),
-            ordinal_number: row.get("ordinal_number"),
+            doginal_number: row.get("doginal_number"),
             number: row.get("number"),
             classic_number: row.get("classic_number"),
             block_height: row.get("block_height"),

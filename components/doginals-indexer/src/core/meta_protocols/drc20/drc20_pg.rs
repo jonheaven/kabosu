@@ -74,15 +74,15 @@ pub async fn get_token_available_balance_for_address<T: GenericClient>(
 }
 
 pub async fn get_unsent_token_transfers<T: GenericClient>(
-    ordinal_numbers: &[u64],
+    doginal_numbers: &[u64],
     client: &T,
 ) -> Result<Vec<DbOperation>, String> {
-    if ordinal_numbers.is_empty() {
+    if doginal_numbers.is_empty() {
         return Ok(vec![]);
     }
     let mut results = vec![];
-    // We can afford a larger chunk size here because we're only using one parameter per ordinal number value.
-    for chunk in ordinal_numbers.chunks(5000) {
+    // We can afford a larger chunk size here because we're only using one parameter per doginal number value.
+    for chunk in doginal_numbers.chunks(5000) {
         let mut wrapped = Vec::with_capacity(chunk.len());
         for n in chunk {
             wrapped.push(PgNumericU64(*n));
@@ -96,10 +96,10 @@ pub async fn get_unsent_token_transfers<T: GenericClient>(
                 "SELECT *
                 FROM operations o
                 WHERE operation = 'transfer'
-                    AND o.ordinal_number = ANY($1)
+                    AND o.doginal_number = ANY($1)
                     AND NOT EXISTS (
                         SELECT 1 FROM operations
-                        WHERE ordinal_number = o.ordinal_number
+                        WHERE doginal_number = o.doginal_number
                         AND operation = 'transfer_send'
                     )
                 LIMIT 1",
@@ -165,7 +165,7 @@ pub async fn insert_operations<T: GenericClient>(
             params.push(&row.operation);
             params.push(&row.inscription_id);
             params.push(&row.inscription_number);
-            params.push(&row.ordinal_number);
+            params.push(&row.doginal_number);
             params.push(&row.block_height);
             params.push(&row.block_hash);
             params.push(&row.tx_id);
@@ -184,7 +184,7 @@ pub async fn insert_operations<T: GenericClient>(
                 &format!(
                     "WITH inserts AS (
                         INSERT INTO operations
-                        (ticker, operation, inscription_id, inscription_number, ordinal_number, block_height, block_hash, tx_id,
+                        (ticker, operation, inscription_id, inscription_number, doginal_number, block_height, block_hash, tx_id,
                         tx_index, output, \"offset\", timestamp, address, to_address, amount)
                         VALUES {}
                         ON CONFLICT (inscription_id, operation) DO NOTHING
@@ -496,7 +496,7 @@ mod test {
 
     use deadpool_postgres::GenericClient;
     use dogecoin::types::{
-        BlockIdentifier, OrdinalInscriptionTransferDestination, TransactionIdentifier,
+        BlockIdentifier, DoginalInscriptionTransferDestination, TransactionIdentifier,
     };
     use postgres::{
         pg_begin, pg_pool_client,
@@ -780,7 +780,7 @@ mod test {
                             address: "324A7GHA2azecbVBAFy4pzEhcPT1GjbUAp".to_string(),
                         },
                         &Brc20RevealBuilder::new()
-                            .ordinal_number(700)
+                            .doginal_number(700)
                             .inscription_number(2)
                             .build(),
                         &BlockIdentifier {
@@ -851,8 +851,8 @@ mod test {
                                     .to_string(),
                         },
                         &Drc20TransferBuilder::new()
-                            .ordinal_number(700)
-                            .destination(OrdinalInscriptionTransferDestination::Transferred(
+                            .doginal_number(700)
+                            .destination(DoginalInscriptionTransferDestination::Transferred(
                                 "bc1pngjqgeamkmmhlr6ft5yllgdmfllvcvnw5s7ew2ler3rl0z47uaesrj6jte"
                                     .to_string(),
                             ))

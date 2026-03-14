@@ -1,6 +1,6 @@
-use bitcoin::Network;
+// ...existing code...
 use deadpool_postgres::GenericClient;
-use dogecoin::types::OrdinalInscriptionNumber;
+use dogecoin::types::DoginalInscriptionNumber;
 
 use super::inscription_sequencing;
 use crate::db::doginals_pg;
@@ -48,9 +48,9 @@ impl SequenceCursor {
         &mut self,
         cursed: bool,
         block_height: u64,
-        network: &Network,
+        dogecoin_network: &dogecoin::types::DogecoinNetwork,
         client: &T,
-    ) -> Result<OrdinalInscriptionNumber, String> {
+    ) -> Result<DoginalInscriptionNumber, String> {
         if block_height < self.current_block_height {
             self.reset();
         }
@@ -61,12 +61,12 @@ impl SequenceCursor {
             false => self.pick_next_pos_classic(client).await?,
         };
 
-        let jubilee = if block_height >= inscription_sequencing::get_jubilee_block_height(network) {
+        let jubilee = if block_height >= inscription_sequencing::get_jubilee_block_height(dogecoin_network) {
             self.pick_next_jubilee_number(client).await?
         } else {
             classic
         };
-        Ok(OrdinalInscriptionNumber { classic, jubilee })
+        Ok(DoginalInscriptionNumber { classic, jubilee })
     }
 
     pub async fn increment<T: GenericClient>(
@@ -169,8 +169,8 @@ impl SequenceCursor {
 
 #[cfg(test)]
 mod test {
-    use bitcoin::Network;
-    use dogecoin::types::OrdinalOperation;
+    use dogecoin::types::DogecoinNetwork;
+    use dogecoin::types::DoginalOperation;
     use postgres::{pg_begin, pg_pool_client};
     use test_case::test_case;
 
@@ -203,11 +203,12 @@ mod test {
 
             // Pick next twice so we can test all cases.
             let mut cursor = SequenceCursor::new();
+            let dogecoin_network = DogecoinNetwork::Mainnet;
             let _ = cursor
                 .pick_next(
                     cursed,
                     block.block_identifier.index + 1,
-                    &Network::Bitcoin,
+                    &dogecoin_network,
                     &client,
                 )
                 .await?;
@@ -219,7 +220,7 @@ mod test {
                 .pick_next(
                     cursed,
                     block.block_identifier.index + 1,
-                    &Network::Bitcoin,
+                    &dogecoin_network,
                     &client,
                 )
                 .await?;
@@ -241,8 +242,8 @@ mod test {
             let client = pg_begin(&mut ord_client).await?;
 
             let mut tx = TestTransactionBuilder::new_with_operation().build();
-            if let OrdinalOperation::InscriptionRevealed(data) =
-                &mut tx.metadata.ordinal_operations[0]
+            if let DoginalOperation::InscriptionRevealed(data) =
+                &mut tx.metadata.doginal_operations[0]
             {
                 data.unbound_sequence = curr_sequence;
             };

@@ -22,25 +22,25 @@ type U64Counter = GenericCounter<AtomicU64>;
 #[derive(Debug, Clone)]
 pub struct PrometheusMonitoring {
     pub last_indexed_block_height: UInt64Gauge,
-    pub last_indexed_rune_number: UInt64Gauge,
+    pub last_indexed_dune_number: UInt64Gauge,
 
     // Performance metrics
     pub block_processing_time: Histogram,
-    pub rune_parsing_time: Histogram,
-    pub rune_computation_time: Histogram,
-    pub rune_db_write_time: Histogram,
+    pub dune_parsing_time: Histogram,
+    pub dune_computation_time: Histogram,
+    pub dune_db_write_time: Histogram,
 
     // Volumetric metrics
-    pub runes_per_block: Histogram,
+    pub dunes_per_block: Histogram,
 
-    // Runes specific metrics
-    pub runes_etching_operations_per_block: UInt64Gauge,
-    pub runes_edict_operations_per_block: UInt64Gauge,
-    pub runes_mint_operations_per_block: UInt64Gauge,
-    pub runes_cenotaph_operations_per_block: UInt64Gauge,
-    pub runes_cenotaph_etching_operations_per_block: UInt64Gauge,
-    pub runes_cenotaph_mint_operations_per_block: UInt64Gauge,
-    pub runes_etching_inputs_checked_per_block: UInt64Gauge,
+    // Dunes specific metrics
+    pub dunes_etching_operations_per_block: UInt64Gauge,
+    pub dunes_edict_operations_per_block: UInt64Gauge,
+    pub dunes_mint_operations_per_block: UInt64Gauge,
+    pub dunes_cenotaph_operations_per_block: UInt64Gauge,
+    pub dunes_cenotaph_etching_operations_per_block: UInt64Gauge,
+    pub dunes_cenotaph_mint_operations_per_block: UInt64Gauge,
+    pub dunes_etching_inputs_checked_per_block: UInt64Gauge,
 
     // Registry
     pub registry: Registry,
@@ -61,104 +61,104 @@ impl PrometheusMonitoring {
             "last_indexed_block_height",
             "Height of the last indexed block",
         );
-        let last_indexed_rune_number = Self::create_and_register_uint64_gauge(
+        let last_indexed_dune_number = Self::create_and_register_uint64_gauge(
             &registry,
-            "last_indexed_rune_number",
+            "last_indexed_dune_number",
             "Number of the last indexed Dune",
         );
 
         // Performance metrics
         let block_processing_time = Self::create_and_register_histogram(
             &registry,
-            "runes_block_processing_time",
+            "dunes_block_processing_time",
             "Time taken to process a block in milliseconds",
             vec![10_000.0, 20_000.0, 30_000.0, 60_000.0, 120_000.0, 300_000.0],
         );
-        let rune_parsing_time = Self::create_and_register_histogram(
+        let dune_parsing_time = Self::create_and_register_histogram(
             &registry,
-            "rune_parsing_time",
-            "Time taken to parse Runes operations in milliseconds",
+            "dune_parsing_time",
+            "Time taken to parse Dunes operations in milliseconds",
             vec![
                 1_000.0, 5_000.0, 10_000.0, 20_000.0, 60_000.0, 120_000.0, 300_000.0,
             ],
         );
-        let rune_computation_time = Self::create_and_register_histogram(
+        let dune_computation_time = Self::create_and_register_histogram(
             &registry,
-            "rune_computation_time",
-            "Time taken to compute Runes data in milliseconds",
+            "dune_computation_time",
+            "Time taken to compute Dunes data in milliseconds",
             vec![
                 1_000.0, 5_000.0, 10_000.0, 20_000.0, 60_000.0, 120_000.0, 300_000.0,
             ],
         );
-        let rune_db_write_time = Self::create_and_register_histogram(
+        let dune_db_write_time = Self::create_and_register_histogram(
             &registry,
-            "rune_db_write_time",
-            "Time taken to write Runes data to database in milliseconds",
+            "dune_db_write_time",
+            "Time taken to write Dunes data to database in milliseconds",
             vec![
                 1_000.0, 5_000.0, 10_000.0, 20_000.0, 60_000.0, 120_000.0, 300_000.0,
             ],
         );
 
         // Volumetric metrics
-        let runes_per_block = Self::create_and_register_histogram(
+        let dunes_per_block = Self::create_and_register_histogram(
             &registry,
-            "runes_per_block",
-            "Number of Runes per block",
+            "dunes_per_block",
+            "Number of Dunes per block",
             vec![1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0],
         );
 
-        // Runes specific metrics per block
-        let runes_etching_operations_per_block = Self::create_and_register_uint64_gauge(
+        // Dunes specific metrics per block
+        let dunes_etching_operations_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_etching_operations_per_block",
-            "Number of Runes etchings processed per block",
+            "dunes_etching_operations_per_block",
+            "Number of Dunes etchings processed per block",
         );
-        let runes_edict_operations_per_block = Self::create_and_register_uint64_gauge(
+        let dunes_edict_operations_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_edict_operations_per_block",
-            "Number of Runes edicts processed per block",
+            "dunes_edict_operations_per_block",
+            "Number of Dunes edicts processed per block",
         );
-        let runes_mint_operations_per_block = Self::create_and_register_uint64_gauge(
+        let dunes_mint_operations_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_mint_operations_per_block",
-            "Number of Runes mints processed per block",
+            "dunes_mint_operations_per_block",
+            "Number of Dunes mints processed per block",
         );
-        let runes_cenotaph_operations_per_block = Self::create_and_register_uint64_gauge(
+        let dunes_cenotaph_operations_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_cenotaph_operations_per_block",
-            "Number of cenotaph Runes processed per block",
+            "dunes_cenotaph_operations_per_block",
+            "Number of cenotaph Dunes processed per block",
         );
-        let runes_cenotaph_etching_operations_per_block = Self::create_and_register_uint64_gauge(
+        let dunes_cenotaph_etching_operations_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_cenotaph_etching_operations_per_block",
-            "Number of cenotaph Runes etchings processed per block",
+            "dunes_cenotaph_etching_operations_per_block",
+            "Number of cenotaph Dunes etchings processed per block",
         );
-        let runes_cenotaph_mint_operations_per_block = Self::create_and_register_uint64_gauge(
+        let dunes_cenotaph_mint_operations_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_cenotaph_mint_operations_per_block",
-            "Number of cenotaph Runes mints processed per block",
+            "dunes_cenotaph_mint_operations_per_block",
+            "Number of cenotaph Dunes mints processed per block",
         );
-        let runes_etching_inputs_checked_per_block = Self::create_and_register_uint64_gauge(
+        let dunes_etching_inputs_checked_per_block = Self::create_and_register_uint64_gauge(
             &registry,
-            "runes_etching_inputs_checked_per_block",
-            "Number of inputs checked for rune commitment per block",
+            "dunes_etching_inputs_checked_per_block",
+            "Number of inputs checked for dune commitment per block",
         );
 
         PrometheusMonitoring {
             last_indexed_block_height,
-            last_indexed_rune_number,
+            last_indexed_dune_number,
             block_processing_time,
-            rune_parsing_time,
-            rune_computation_time,
-            rune_db_write_time,
-            runes_per_block,
-            runes_etching_operations_per_block,
-            runes_edict_operations_per_block,
-            runes_mint_operations_per_block,
-            runes_cenotaph_operations_per_block,
-            runes_cenotaph_etching_operations_per_block,
-            runes_cenotaph_mint_operations_per_block,
-            runes_etching_inputs_checked_per_block,
+            dune_parsing_time,
+            dune_computation_time,
+            dune_db_write_time,
+            dunes_per_block,
+            dunes_etching_operations_per_block,
+            dunes_edict_operations_per_block,
+            dunes_mint_operations_per_block,
+            dunes_cenotaph_operations_per_block,
+            dunes_cenotaph_etching_operations_per_block,
+            dunes_cenotaph_mint_operations_per_block,
+            dunes_etching_inputs_checked_per_block,
             registry,
         }
     }
@@ -196,17 +196,17 @@ impl PrometheusMonitoring {
         h
     }
 
-    pub async fn initialize(&self, max_rune_number: u64, block_height: u64) -> Result<(), String> {
+    pub async fn initialize(&self, max_dune_number: u64, block_height: u64) -> Result<(), String> {
         self.metrics_block_indexed(block_height);
-        self.metrics_rune_indexed(max_rune_number);
+        self.metrics_dune_indexed(max_dune_number);
 
         // Reset per-block metrics to 0
-        self.metrics_record_runes_etching_per_block(0);
-        self.metrics_record_runes_mint_per_block(0);
-        self.metrics_record_runes_edict_per_block(0);
-        self.metrics_record_runes_cenotaph_per_block(0);
-        self.metrics_record_runes_cenotaph_etching_per_block(0);
-        self.metrics_record_runes_cenotaph_mint_per_block(0);
+        self.metrics_record_dunes_etching_per_block(0);
+        self.metrics_record_dunes_mint_per_block(0);
+        self.metrics_record_dunes_edict_per_block(0);
+        self.metrics_record_dunes_cenotaph_per_block(0);
+        self.metrics_record_dunes_cenotaph_etching_per_block(0);
+        self.metrics_record_dunes_cenotaph_mint_per_block(0);
 
         Ok(())
     }
@@ -218,10 +218,10 @@ impl PrometheusMonitoring {
         }
     }
 
-    pub fn metrics_rune_indexed(&self, rune_number: u64) {
-        let highest_appended = self.last_indexed_rune_number.get();
-        if rune_number > highest_appended {
-            self.last_indexed_rune_number.set(rune_number);
+    pub fn metrics_dune_indexed(&self, dune_number: u64) {
+        let highest_appended = self.last_indexed_dune_number.get();
+        if dune_number > highest_appended {
+            self.last_indexed_dune_number.set(dune_number);
         }
     }
 
@@ -230,51 +230,51 @@ impl PrometheusMonitoring {
         self.block_processing_time.observe(process_time);
     }
 
-    pub fn metrics_record_rune_parsing_time(&self, ms: f64) {
-        self.rune_parsing_time.observe(ms);
+    pub fn metrics_record_dune_parsing_time(&self, ms: f64) {
+        self.dune_parsing_time.observe(ms);
     }
 
-    pub fn metrics_record_rune_computation_time(&self, ms: f64) {
-        self.rune_computation_time.observe(ms);
+    pub fn metrics_record_dune_computation_time(&self, ms: f64) {
+        self.dune_computation_time.observe(ms);
     }
 
-    pub fn metrics_record_rune_db_write_time(&self, ms: f64) {
-        self.rune_db_write_time.observe(ms);
+    pub fn metrics_record_dune_db_write_time(&self, ms: f64) {
+        self.dune_db_write_time.observe(ms);
     }
 
     // Volumetric metrics methods
-    pub fn metrics_record_runes_per_block(&self, count: u64) {
-        self.runes_per_block.observe(count as f64);
+    pub fn metrics_record_dunes_per_block(&self, count: u64) {
+        self.dunes_per_block.observe(count as f64);
     }
 
-    // Runes specific metrics methods per block
-    pub fn metrics_record_runes_etching_per_block(&self, etching_count: u64) {
-        self.runes_etching_operations_per_block.set(etching_count);
+    // Dunes specific metrics methods per block
+    pub fn metrics_record_dunes_etching_per_block(&self, etching_count: u64) {
+        self.dunes_etching_operations_per_block.set(etching_count);
     }
 
-    pub fn metrics_record_runes_edict_per_block(&self, edict_count: u64) {
-        self.runes_edict_operations_per_block.set(edict_count);
+    pub fn metrics_record_dunes_edict_per_block(&self, edict_count: u64) {
+        self.dunes_edict_operations_per_block.set(edict_count);
     }
 
-    pub fn metrics_record_runes_mint_per_block(&self, mint_count: u64) {
-        self.runes_mint_operations_per_block.set(mint_count);
+    pub fn metrics_record_dunes_mint_per_block(&self, mint_count: u64) {
+        self.dunes_mint_operations_per_block.set(mint_count);
     }
 
-    pub fn metrics_record_runes_cenotaph_per_block(&self, cenotaph_count: u64) {
-        self.runes_cenotaph_operations_per_block.set(cenotaph_count);
+    pub fn metrics_record_dunes_cenotaph_per_block(&self, cenotaph_count: u64) {
+        self.dunes_cenotaph_operations_per_block.set(cenotaph_count);
     }
 
-    pub fn metrics_record_runes_cenotaph_etching_per_block(&self, cenotaph_etching_count: u64) {
-        self.runes_cenotaph_etching_operations_per_block
+    pub fn metrics_record_dunes_cenotaph_etching_per_block(&self, cenotaph_etching_count: u64) {
+        self.dunes_cenotaph_etching_operations_per_block
             .set(cenotaph_etching_count);
     }
 
-    pub fn metrics_record_runes_cenotaph_mint_per_block(&self, cenotaph_mint_count: u64) {
-        self.runes_cenotaph_mint_operations_per_block
+    pub fn metrics_record_dunes_cenotaph_mint_per_block(&self, cenotaph_mint_count: u64) {
+        self.dunes_cenotaph_mint_operations_per_block
             .set(cenotaph_mint_count);
     }
-    pub fn metrics_record_runes_etching_inputs_checked_per_block(&self, inputs_count: u64) {
-        self.runes_etching_inputs_checked_per_block
+    pub fn metrics_record_dunes_etching_inputs_checked_per_block(&self, inputs_count: u64) {
+        self.dunes_etching_inputs_checked_per_block
             .set(inputs_count);
     }
 }
@@ -403,15 +403,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rune_parsing_time() {
+    fn test_dune_parsing_time() {
         let monitoring = PrometheusMonitoring::new();
 
         // Test with different parsing times
-        monitoring.metrics_record_rune_parsing_time(50.0);
-        monitoring.metrics_record_rune_parsing_time(150.0);
+        monitoring.metrics_record_dune_parsing_time(50.0);
+        monitoring.metrics_record_dune_parsing_time(150.0);
 
         // Get the histogram values directly
-        let mut mfs = monitoring.rune_parsing_time.collect();
+        let mut mfs = monitoring.dune_parsing_time.collect();
         assert_eq!(mfs.len(), 1);
 
         let mf = mfs.pop().unwrap();
@@ -434,15 +434,15 @@ mod tests {
     }
 
     #[test]
-    fn test_runes_computation_time() {
+    fn test_dunes_computation_time() {
         let monitoring = PrometheusMonitoring::new();
 
         // Test with different computation times
-        monitoring.metrics_record_rune_computation_time(75.0);
-        monitoring.metrics_record_rune_computation_time(200.0);
+        monitoring.metrics_record_dune_computation_time(75.0);
+        monitoring.metrics_record_dune_computation_time(200.0);
 
         // Get the histogram values directly
-        let mut mfs = monitoring.rune_computation_time.collect();
+        let mut mfs = monitoring.dune_computation_time.collect();
         assert_eq!(mfs.len(), 1);
 
         let mf = mfs.pop().unwrap();
@@ -465,15 +465,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rune_db_write_time() {
+    fn test_dune_db_write_time() {
         let monitoring = PrometheusMonitoring::new();
 
         // Test with different write times
-        monitoring.metrics_record_rune_db_write_time(25.0);
-        monitoring.metrics_record_rune_db_write_time(100.0);
+        monitoring.metrics_record_dune_db_write_time(25.0);
+        monitoring.metrics_record_dune_db_write_time(100.0);
 
         // Get the histogram values directly
-        let mut mfs = monitoring.rune_db_write_time.collect();
+        let mut mfs = monitoring.dune_db_write_time.collect();
         assert_eq!(mfs.len(), 1);
 
         let mf = mfs.pop().unwrap();
@@ -496,15 +496,15 @@ mod tests {
     }
 
     #[test]
-    fn test_runes_in_block() {
+    fn test_dunes_in_block() {
         let monitoring = PrometheusMonitoring::new();
 
         // Test with different operation counts
-        monitoring.metrics_record_runes_per_block(5);
-        monitoring.metrics_record_runes_per_block(10);
+        monitoring.metrics_record_dunes_per_block(5);
+        monitoring.metrics_record_dunes_per_block(10);
 
         // Get the histogram values directly
-        let mut mfs = monitoring.runes_per_block.collect();
+        let mut mfs = monitoring.dunes_per_block.collect();
         assert_eq!(mfs.len(), 1);
 
         let mf = mfs.pop().unwrap();
@@ -557,32 +557,32 @@ mod tests {
         let monitoring = PrometheusMonitoring::new();
 
         // Record some test metrics
-        monitoring.metrics_record_rune_parsing_time(50.0);
-        monitoring.metrics_record_rune_computation_time(75.0);
-        monitoring.metrics_record_rune_db_write_time(25.0);
+        monitoring.metrics_record_dune_parsing_time(50.0);
+        monitoring.metrics_record_dune_computation_time(75.0);
+        monitoring.metrics_record_dune_db_write_time(25.0);
 
         // Verify registry contains the metrics
         let metrics = monitoring.registry.gather();
 
         // Verify all expected metrics exist
-        assert!(verify_metric_exists(&metrics, "rune_parsing_time"));
-        assert!(verify_metric_exists(&metrics, "rune_computation_time"));
-        assert!(verify_metric_exists(&metrics, "rune_db_write_time"));
+        assert!(verify_metric_exists(&metrics, "dune_parsing_time"));
+        assert!(verify_metric_exists(&metrics, "dune_computation_time"));
+        assert!(verify_metric_exists(&metrics, "dune_db_write_time"));
     }
 
     #[test]
-    fn test_runes_operations_per_block() {
+    fn test_dunes_operations_per_block() {
         let monitoring = PrometheusMonitoring::new();
 
         // First block operations
-        monitoring.metrics_record_runes_etching_per_block(2);
-        monitoring.metrics_record_runes_mint_per_block(3);
-        monitoring.metrics_record_runes_edict_per_block(1);
-        monitoring.metrics_record_runes_cenotaph_etching_per_block(1);
-        monitoring.metrics_record_runes_cenotaph_mint_per_block(1);
+        monitoring.metrics_record_dunes_etching_per_block(2);
+        monitoring.metrics_record_dunes_mint_per_block(3);
+        monitoring.metrics_record_dunes_edict_per_block(1);
+        monitoring.metrics_record_dunes_cenotaph_etching_per_block(1);
+        monitoring.metrics_record_dunes_cenotaph_mint_per_block(1);
 
         // Verify first block values
-        let mut mfs = monitoring.runes_etching_operations_per_block.collect();
+        let mut mfs = monitoring.dunes_etching_operations_per_block.collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
         let m = mf.get_metric().first().unwrap();
@@ -594,7 +594,7 @@ mod tests {
         );
 
         // Verify first block mint operations
-        mfs = monitoring.runes_mint_operations_per_block.collect();
+        mfs = monitoring.dunes_mint_operations_per_block.collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
         let m = mf.get_metric().first().unwrap();
@@ -606,7 +606,7 @@ mod tests {
         );
 
         // Verify first block edict operations
-        mfs = monitoring.runes_edict_operations_per_block.collect();
+        mfs = monitoring.dunes_edict_operations_per_block.collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
         let m = mf.get_metric().first().unwrap();
@@ -619,7 +619,7 @@ mod tests {
 
         // Verify first block cenotaph etching operations
         mfs = monitoring
-            .runes_cenotaph_etching_operations_per_block
+            .dunes_cenotaph_etching_operations_per_block
             .collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
@@ -633,7 +633,7 @@ mod tests {
 
         // Verify first block cenotaph mint operations
         mfs = monitoring
-            .runes_cenotaph_mint_operations_per_block
+            .dunes_cenotaph_mint_operations_per_block
             .collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
@@ -646,14 +646,14 @@ mod tests {
         );
 
         // Second block operations (different values)
-        monitoring.metrics_record_runes_etching_per_block(4);
-        monitoring.metrics_record_runes_mint_per_block(1);
-        monitoring.metrics_record_runes_edict_per_block(3);
-        monitoring.metrics_record_runes_cenotaph_etching_per_block(2);
-        monitoring.metrics_record_runes_cenotaph_mint_per_block(0);
+        monitoring.metrics_record_dunes_etching_per_block(4);
+        monitoring.metrics_record_dunes_mint_per_block(1);
+        monitoring.metrics_record_dunes_edict_per_block(3);
+        monitoring.metrics_record_dunes_cenotaph_etching_per_block(2);
+        monitoring.metrics_record_dunes_cenotaph_mint_per_block(0);
 
         // Verify second block values (should overwrite first block values)
-        mfs = monitoring.runes_etching_operations_per_block.collect();
+        mfs = monitoring.dunes_etching_operations_per_block.collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
         let m = mf.get_metric().first().unwrap();
@@ -664,7 +664,7 @@ mod tests {
             "Should have recorded 4 etching operations in second block"
         );
 
-        mfs = monitoring.runes_mint_operations_per_block.collect();
+        mfs = monitoring.dunes_mint_operations_per_block.collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
         let m = mf.get_metric().first().unwrap();
@@ -675,7 +675,7 @@ mod tests {
             "Should have recorded 1 mint operation in second block"
         );
 
-        mfs = monitoring.runes_edict_operations_per_block.collect();
+        mfs = monitoring.dunes_edict_operations_per_block.collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
         let m = mf.get_metric().first().unwrap();
@@ -687,7 +687,7 @@ mod tests {
         );
 
         mfs = monitoring
-            .runes_cenotaph_etching_operations_per_block
+            .dunes_cenotaph_etching_operations_per_block
             .collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
@@ -700,7 +700,7 @@ mod tests {
         );
 
         mfs = monitoring
-            .runes_cenotaph_mint_operations_per_block
+            .dunes_cenotaph_mint_operations_per_block
             .collect();
         assert_eq!(mfs.len(), 1);
         let mf = mfs.pop().unwrap();
@@ -738,15 +738,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rune_indexed() {
+    fn test_dune_indexed() {
         let monitoring = PrometheusMonitoring::new();
 
-        // Record rune indexing
-        monitoring.metrics_rune_indexed(50);
-        monitoring.metrics_rune_indexed(100);
+        // Record dune indexing
+        monitoring.metrics_dune_indexed(50);
+        monitoring.metrics_dune_indexed(100);
 
         // Get the counter value
-        let mut mfs = monitoring.last_indexed_rune_number.collect();
+        let mut mfs = monitoring.last_indexed_dune_number.collect();
         assert_eq!(mfs.len(), 1);
 
         let mf = mfs.pop().unwrap();
@@ -757,27 +757,27 @@ mod tests {
         assert_eq!(
             gauge.get_value(),
             100.0,
-            "Highest rune number indexed should be 100"
+            "Highest dune number indexed should be 100"
         );
     }
 
     #[test]
-    fn test_runes_etching_inputs_checked_per_block_metric() {
+    fn test_dunes_etching_inputs_checked_per_block_metric() {
         let monitoring = PrometheusMonitoring::new();
 
         // Record inputs checked for different blocks
-        monitoring.metrics_record_runes_etching_inputs_checked_per_block(5);
-        monitoring.metrics_record_runes_etching_inputs_checked_per_block(10);
-        monitoring.metrics_record_runes_etching_inputs_checked_per_block(3);
+        monitoring.metrics_record_dunes_etching_inputs_checked_per_block(5);
+        monitoring.metrics_record_dunes_etching_inputs_checked_per_block(10);
+        monitoring.metrics_record_dunes_etching_inputs_checked_per_block(3);
 
         // Get the gauge values using the registry
         let metrics = monitoring.registry.gather();
 
-        // Find the runes_etching_inputs_checked_per_block metric
+        // Find the dunes_etching_inputs_checked_per_block metric
         let metric_family = metrics
             .iter()
-            .find(|mf| mf.get_name() == "runes_etching_inputs_checked_per_block")
-            .expect("Should find runes_etching_inputs_checked_per_block metric");
+            .find(|mf| mf.get_name() == "dunes_etching_inputs_checked_per_block")
+            .expect("Should find dunes_etching_inputs_checked_per_block metric");
 
         let metric = metric_family.get_metric().first().unwrap();
         let gauge = metric.get_gauge();

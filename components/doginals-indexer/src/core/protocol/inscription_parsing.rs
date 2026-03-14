@@ -8,8 +8,8 @@ use dogecoin::{
     try_debug, try_warn,
     types::{
         dogecoin::TxOut, BlockIdentifier, DogecoinBlockData, DogecoinNetwork,
-        DogecoinTransactionData, OrdinalInscriptionCurseType, OrdinalInscriptionNumber,
-        OrdinalInscriptionRevealData, OrdinalOperation,
+        DogecoinTransactionData, DoginalInscriptionCurseType, DoginalInscriptionNumber,
+        DoginalInscriptionRevealData, DoginalOperation,
     },
     utils::Context,
 };
@@ -28,7 +28,12 @@ use crate::core::meta_protocols::drc20::{
     parser::{parse_drc20_operation, ParsedDrc20Operation},
 };
 
-use doge_lotto::{try_parse_lotto_deploy, try_parse_lotto_mint, LottoDeploy, LottoMint};
+use doge_lotto::{
+    LottoDeploy, LottoMint, LottoTemplate, ResolutionMode, LottoDraw, NumberConfig,
+    validate_mint_against_deploy, derive_draw_for_deploy, try_parse_lotto_deploy, try_parse_lotto_mint,
+    classic_prize_bps, compute_ticket_fingerprint, count_classic_matches, derive_classic_drawn_numbers,
+    derive_classic_numbers, score_ticket, u256_abs_diff, FINGERPRINT_TIER_BPS,
+};
 /// A DMP operation parsed from an inscription body, bundled with context.
 #[derive(Debug, Clone)]
 pub struct ParsedDmpOp {
@@ -68,7 +73,7 @@ pub fn parse_inscriptions_from_witness(
     input_index: usize,
     witness_bytes: Vec<Vec<u8>>,
     txid: &str,
-) -> Option<Vec<(OrdinalInscriptionRevealData, Inscription)>> {
+) -> Option<Vec<(DoginalInscriptionRevealData, Inscription)>> {
     let witness = Witness::from_slice(&witness_bytes);
     let tapscript = witness.tapscript()?;
     let envelopes: Vec<Envelope<Inscription>> = Envelope::from_tapscript(tapscript, input_index)
@@ -79,21 +84,21 @@ pub fn parse_inscriptions_from_witness(
     let mut inscriptions = vec![];
     for envelope in envelopes.into_iter() {
         let curse_type = if envelope.payload.unrecognized_even_field {
-            Some(OrdinalInscriptionCurseType::UnrecognizedEvenField)
+            Some(DoginalInscriptionCurseType::UnrecognizedEvenField)
         } else if envelope.payload.duplicate_field {
-            Some(OrdinalInscriptionCurseType::DuplicateField)
+            Some(DoginalInscriptionCurseType::DuplicateField)
         } else if envelope.payload.incomplete_field {
-            Some(OrdinalInscriptionCurseType::IncompleteField)
+            Some(DoginalInscriptionCurseType::IncompleteField)
         } else if envelope.input != 0 {
-            Some(OrdinalInscriptionCurseType::NotInFirstInput)
+            Some(DoginalInscriptionCurseType::NotInFirstInput)
         } else if envelope.offset != 0 {
-            Some(OrdinalInscriptionCurseType::NotAtOffsetZero)
+            Some(DoginalInscriptionCurseType::NotAtOffsetZero)
         } else if envelope.payload.pointer.is_some() {
-            Some(OrdinalInscriptionCurseType::Pointer)
+            Some(DoginalInscriptionCurseType::Pointer)
         } else if envelope.pushnum {
-            Some(OrdinalInscriptionCurseType::Pushnum)
+            Some(DoginalInscriptionCurseType::Pushnum)
         } else if envelope.stutter {
-            Some(OrdinalInscriptionCurseType::Stutter)
+            Some(DoginalInscriptionCurseType::Stutter)
         } else {
             None
         };
@@ -119,7 +124,7 @@ pub fn parse_inscriptions_from_witness(
         let metadata = envelope.payload.metadata().map(|m| json!(m));
 
         // Most of these fields will be calculated later when we know for certain which satoshi contains this inscription.
-        let reveal_data = OrdinalInscriptionRevealData {
+        let reveal_data = DoginalInscriptionRevealData {
             content_type: envelope.payload.content_type().unwrap_or("").to_string(),
             content_bytes,
             content_length: inscription_content_bytes.len(),
@@ -129,15 +134,15 @@ pub fn parse_inscriptions_from_witness(
             inscription_output_value: 0,
             inscription_pointer: envelope.payload.pointer(),
             inscription_fee: 0,
-            inscription_number: OrdinalInscriptionNumber::zero(),
+            inscription_number: DoginalInscriptionNumber::zero(),
             inscriber_address: None,
             parents,
             delegate,
             metaprotocol,
             metadata,
-            ordinal_number: 0,
-            ordinal_block_height: 0,
-            ordinal_offset: 0,
+            doginal_number: 0,
+            doginal_block_height: 0,
+            doginal_offset: 0,
             transfers_pre_inscription: 0,
             koinupoint_post_inscription: String::new(),
             curse_type,
@@ -183,7 +188,7 @@ pub fn parse_inscriptions_from_standardized_tx(
     dmp_ops: &mut Vec<ParsedDmpOp>,
     config: &Config,
     ctx: &Context,
-) -> Vec<OrdinalOperation> {
+) -> Vec<DoginalOperation> {
     let mut operations = vec![];
 
     // Dogecoin uses script_sig for inscriptions, not witness data.
@@ -229,21 +234,21 @@ pub fn parse_inscriptions_from_standardized_tx(
         let inscription = envelope.payload;
 
         let curse_type = if inscription.unrecognized_even_field {
-            Some(OrdinalInscriptionCurseType::UnrecognizedEvenField)
+            Some(DoginalInscriptionCurseType::UnrecognizedEvenField)
         } else if inscription.duplicate_field {
-            Some(OrdinalInscriptionCurseType::DuplicateField)
+            Some(DoginalInscriptionCurseType::DuplicateField)
         } else if inscription.incomplete_field {
-            Some(OrdinalInscriptionCurseType::IncompleteField)
+            Some(DoginalInscriptionCurseType::IncompleteField)
         } else if envelope.input != 0 {
-            Some(OrdinalInscriptionCurseType::NotInFirstInput)
+            Some(DoginalInscriptionCurseType::NotInFirstInput)
         } else if envelope.offset != 0 {
-            Some(OrdinalInscriptionCurseType::NotAtOffsetZero)
+            Some(DoginalInscriptionCurseType::NotAtOffsetZero)
         } else if inscription.pointer.is_some() {
-            Some(OrdinalInscriptionCurseType::Pointer)
+            Some(DoginalInscriptionCurseType::Pointer)
         } else if envelope.pushnum {
-            Some(OrdinalInscriptionCurseType::Pushnum)
+            Some(DoginalInscriptionCurseType::Pushnum)
         } else if envelope.stutter {
-            Some(OrdinalInscriptionCurseType::Stutter)
+            Some(DoginalInscriptionCurseType::Stutter)
         } else {
             None
         };
@@ -290,7 +295,7 @@ pub fn parse_inscriptions_from_standardized_tx(
             .unwrap_or_default();
 
         // Most of these fields will be calculated later when we know for certain which koinu contains this inscription.
-        let reveal_data = OrdinalInscriptionRevealData {
+        let reveal_data = DoginalInscriptionRevealData {
             content_type: content_type.clone(),
             content_bytes,
             content_length: inscription_content_bytes.len(),
@@ -308,15 +313,15 @@ pub fn parse_inscriptions_from_standardized_tx(
                 }
             }),
             inscription_fee: 0,
-            inscription_number: OrdinalInscriptionNumber::zero(),
+            inscription_number: DoginalInscriptionNumber::zero(),
             inscriber_address: None,
             parents,
             delegate,
             metaprotocol,
             metadata,
-            ordinal_number: 0,
-            ordinal_block_height: 0,
-            ordinal_offset: 0,
+            doginal_number: 0,
+            doginal_block_height: 0,
+            doginal_offset: 0,
             transfers_pre_inscription: 0,
             koinupoint_post_inscription: String::new(),
             curse_type,
@@ -325,7 +330,7 @@ pub fn parse_inscriptions_from_standardized_tx(
         };
 
         // Check for DRC-20 operations
-        if let Some(drc20) = config.ordinals_drc20_config() {
+        if let Some(drc20) = config.doginals_drc20_config() {
             if drc20.enabled
                 && block_identifier.index >= drc20_activation_height(network)
                 && (content_type.clone().starts_with("application/json")
@@ -437,7 +442,7 @@ pub fn parse_inscriptions_from_standardized_tx(
             }
         }
 
-        operations.push(OrdinalOperation::InscriptionRevealed(reveal_data));
+        operations.push(DoginalOperation::InscriptionRevealed(reveal_data));
     }
 
     operations
@@ -464,7 +469,7 @@ pub fn parse_inscriptions_in_standardized_block(
     let block_timestamp = block.timestamp;
     for tx in block.transactions.iter_mut() {
         let start_idx = dmp_ops.len();
-        tx.metadata.ordinal_operations = parse_inscriptions_from_standardized_tx(
+        tx.metadata.doginal_operations = parse_inscriptions_from_standardized_tx(
             tx,
             &block.block_identifier,
             &block.metadata.network,
@@ -489,7 +494,7 @@ mod test {
     use std::collections::HashMap;
 
     use config::Config;
-    use dogecoin::{types::OrdinalOperation, utils::Context};
+    use dogecoin::{types::DoginalOperation, utils::Context};
 
     use super::parse_inscriptions_in_standardized_block;
     use crate::core::test_builders::{TestBlockBuilder, TestTransactionBuilder, TestTxInBuilder};
@@ -524,8 +529,8 @@ mod test {
             &config,
             &ctx,
         );
-        let OrdinalOperation::InscriptionRevealed(reveal) =
-            &block.transactions[0].metadata.ordinal_operations[0]
+        let DoginalOperation::InscriptionRevealed(reveal) =
+            &block.transactions[0].metadata.doginal_operations[0]
         else {
             panic!();
         };

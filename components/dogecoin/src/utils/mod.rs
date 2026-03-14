@@ -1,4 +1,4 @@
-pub mod bitcoind;
+pub mod dogecoind;
 
 use std::{
     collections::{BTreeSet, VecDeque},

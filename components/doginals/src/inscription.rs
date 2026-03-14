@@ -31,7 +31,7 @@ impl Inscription {
     //   parents: Vec<InscriptionId>,
     //   path: Option<PathBuf>,
     //   pointer: Option<u64>,
-    //   rune: Option<Rune>,
+    //   dune: Option<Dune>,
     // ) -> Result<Self, Error> {
     //   let path = path.as_ref();
 
@@ -98,7 +98,7 @@ impl Inscription {
     //     metaprotocol: metaprotocol.map(|metaprotocol| metaprotocol.into_bytes()),
     //     parents: parents.iter().map(|parent| parent.value()).collect(),
     //     pointer: pointer.map(Self::pointer_value),
-    //     rune: rune.map(|rune| rune.commitment()),
+    //     dune: dune.map(|dune| dune.commitment()),
     //     ..default()
     //   })
     // }

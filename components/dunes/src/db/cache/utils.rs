@@ -6,15 +6,20 @@ use doginals_parser::DuneId;
 use lru::LruCache;
 use tokio_postgres::Transaction;
 
-use super::{input_rune_balance::InputRuneBalance, transaction_location::TransactionLocation};
+use super::input_dune_balance::InputDuneBalance;
+#[cfg(test)]
+use bitcoin::hashes::hex::FromHex;
+#[cfg(test)]
+use bitcoin::{Txid, OutPoint, Sequence, Witness};
+use super::transaction_location::TransactionLocation;
 use crate::db::{
     models::{
-        db_ledger_entry::DbLedgerEntry, db_ledger_operation::DbLedgerOperation, db_rune::DbDune,
+        db_ledger_entry::DbLedgerEntry, db_ledger_operation::DbLedgerOperation, db_dune::DbDune,
     },
-    pg_get_input_rune_balances,
+    pg_get_input_dune_balances,
 };
 
-/// Takes all transaction inputs and transforms them into rune balances to be allocated for operations. Looks inside an output LRU
+/// Takes all transaction inputs and transforms them into dune balances to be allocated for operations. Looks inside an output LRU
 /// cache and the DB when there are cache misses.
 ///
 /// # Arguments
@@ -24,15 +29,15 @@ use crate::db::{
 /// * `output_cache` - LRU cache with output balances
 /// * `db_tx` - DB transaction
 /// * `ctx` - Context
-pub async fn input_rune_balances_from_tx_inputs(
+pub async fn input_dune_balances_from_tx_inputs(
     inputs: &[TxIn],
-    block_output_cache: &HashMap<(String, u32), HashMap<DuneId, Vec<InputRuneBalance>>>,
-    output_cache: &mut LruCache<(String, u32), HashMap<DuneId, Vec<InputRuneBalance>>>,
+    block_output_cache: &HashMap<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
+    output_cache: &mut LruCache<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
     db_tx: &mut Transaction<'_>,
     ctx: &Context,
-) -> HashMap<DuneId, VecDeque<InputRuneBalance>> {
-    // Maps input index to all of its rune balances. Useful in order to keep rune inputs in order.
-    let mut indexed_input_runes = HashMap::new();
+) -> HashMap<DuneId, VecDeque<InputDuneBalance>> {
+    // Maps input index to all of its dune balances. Useful in order to keep dune inputs in order.
+    let mut indexed_input_dunes = HashMap::new();
     let mut cache_misses = vec![];
 
     // Look in both current block output cache and in long term LRU cache.
@@ -41,9 +46,9 @@ pub async fn input_rune_balances_from_tx_inputs(
         let vout = input.previous_output.vout;
         let k = (tx_id.clone(), vout);
         if let Some(map) = block_output_cache.get(&k) {
-            indexed_input_runes.insert(i as u32, map.clone());
+            indexed_input_dunes.insert(i as u32, map.clone());
         } else if let Some(map) = output_cache.get(&k) {
-            indexed_input_runes.insert(i as u32, map.clone());
+            indexed_input_dunes.insert(i as u32, map.clone());
         } else {
             cache_misses.push((i as u32, tx_id, vout));
         }
@@ -51,24 +56,24 @@ pub async fn input_rune_balances_from_tx_inputs(
     // Look for cache misses in database. We don't need to `flush` the DB cache here because we've already looked in the current
     // block's output cache.
     if !cache_misses.is_empty() {
-        let output_balances = pg_get_input_rune_balances(cache_misses, db_tx, ctx).await;
-        indexed_input_runes.extend(output_balances);
+        let output_balances = pg_get_input_dune_balances(cache_misses, db_tx, ctx).await;
+        indexed_input_dunes.extend(output_balances);
     }
 
-    let mut final_input_runes: HashMap<DuneId, VecDeque<InputRuneBalance>> = HashMap::new();
-    let mut input_keys: Vec<u32> = indexed_input_runes.keys().copied().collect();
+    let mut final_input_dunes: HashMap<DuneId, VecDeque<InputDuneBalance>> = HashMap::new();
+    let mut input_keys: Vec<u32> = indexed_input_dunes.keys().copied().collect();
     input_keys.sort();
     for key in input_keys.iter() {
-        let input_value = indexed_input_runes.get(key).unwrap();
-        for (rune_id, vec) in input_value.iter() {
-            if let Some(rune) = final_input_runes.get_mut(rune_id) {
-                rune.extend(vec.clone());
+        let input_value = indexed_input_dunes.get(key).unwrap();
+        for (dune_id, vec) in input_value.iter() {
+            if let Some(dune) = final_input_dunes.get_mut(dune_id) {
+                dune.extend(vec.clone());
             } else {
-                final_input_runes.insert(*rune_id, VecDeque::from(vec.clone()));
+                final_input_dunes.insert(*dune_id, VecDeque::from(vec.clone()));
             }
         }
     }
-    final_input_runes
+    final_input_dunes
 }
 
 /// Moves data from the current block's output cache to the long-term LRU output cache. Clears the block output cache when done.
@@ -78,16 +83,16 @@ pub async fn input_rune_balances_from_tx_inputs(
 /// * `block_output_cache` - Block output cache
 /// * `output_cache` - Output LRU cache
 pub fn move_block_output_cache_to_output_cache(
-    block_output_cache: &mut HashMap<(String, u32), HashMap<DuneId, Vec<InputRuneBalance>>>,
-    output_cache: &mut LruCache<(String, u32), HashMap<DuneId, Vec<InputRuneBalance>>>,
+    block_output_cache: &mut HashMap<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
+    output_cache: &mut LruCache<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
 ) {
     for (k, block_output_map) in block_output_cache.iter() {
         if let Some(v) = output_cache.get_mut(k) {
-            for (rune_id, balances) in block_output_map.iter() {
-                if let Some(rune_balance) = v.get_mut(rune_id) {
-                    rune_balance.extend(balances.clone());
+            for (dune_id, balances) in block_output_map.iter() {
+                if let Some(dune_balance) = v.get_mut(dune_id) {
+                    dune_balance.extend(balances.clone());
                 } else {
-                    v.insert(*rune_id, balances.clone());
+                    v.insert(*dune_id, balances.clone());
                 }
             }
         } else {
@@ -102,7 +107,7 @@ pub fn move_block_output_cache_to_output_cache(
 pub fn new_sequential_ledger_entry(
     location: &TransactionLocation,
     amount: Option<u128>,
-    rune_id: DuneId,
+    dune_id: DuneId,
     output: Option<u32>,
     address: Option<&String>,
     receiver_address: Option<&String>,
@@ -111,7 +116,7 @@ pub fn new_sequential_ledger_entry(
 ) -> DbLedgerEntry {
     let entry = DbLedgerEntry::from_values(
         amount,
-        rune_id,
+        dune_id,
         &location.block_hash,
         location.block_height,
         location.tx_index,
@@ -127,25 +132,25 @@ pub fn new_sequential_ledger_entry(
     entry
 }
 
-/// Moves rune balance from transaction inputs into a transaction output.
+/// Moves dune balance from transaction inputs into a transaction output.
 ///
 /// # Arguments
 ///
 /// * `location` - Transaction location.
-/// * `output` - Output where runes will be moved to. If `None`, runes are burned.
-/// * `rune_id` - Dune that is being moved.
-/// * `input_balances` - Balances input to this transaction for this rune. This value will be modified by the moves happening in
+/// * `output` - Output where dunes will be moved to. If `None`, dunes are burned.
+/// * `dune_id` - Dune that is being moved.
+/// * `input_balances` - Balances input to this transaction for this dune. This value will be modified by the moves happening in
 ///   this function.
-/// * `outputs` - Transaction outputs eligible to receive runes.
+/// * `outputs` - Transaction outputs eligible to receive dunes.
 /// * `amount` - Amount of balance to move. If value is zero, all inputs will be moved to the output.
 /// * `next_event_index` - Next sequential event index to create. This value will be modified.
 /// * `ctx` - Context.
 #[allow(clippy::too_many_arguments)]
-pub fn move_rune_balance_to_output(
+pub fn move_dune_balance_to_output(
     location: &TransactionLocation,
     output: Option<u32>,
-    rune_id: &DuneId,
-    input_balances: &mut VecDeque<InputRuneBalance>,
+    dune_id: &DuneId,
+    input_balances: &mut VecDeque<InputDuneBalance>,
     outputs: &HashMap<u32, ScriptBuf>,
     amount: u128,
     next_event_index: &mut u32,
@@ -168,7 +173,7 @@ pub fn move_rune_balance_to_output(
             None => {
                 try_debug!(
                     ctx,
-                    "Attempted move to non-eligible output {output}, runes will be burnt {location}"
+                    "Attempted move to non-eligible output {output}, dunes will be burnt {location}"
                 );
                 None
             }
@@ -186,31 +191,23 @@ pub fn move_rune_balance_to_output(
     let mut total_sent = 0;
     let mut senders = vec![];
     loop {
-        // Do we still have input balance left to move?
-        let Some(input_bal) = input_balances.pop_front() else {
-            break;
-        };
-        // Select the correct move amount.
+        let Some(input_bal) = input_balances.pop_front() else { break; };
         let balance_taken = if amount == 0 {
             input_bal.amount
         } else {
             input_bal.amount.min(amount - total_sent)
         };
         total_sent += balance_taken;
-        // If the input balance came from an address, add to `Send` operations.
         if let Some(sender_address) = input_bal.address.clone() {
             senders.push((balance_taken, sender_address));
         }
-        // Is there still some balance left on this input? If so, keep it for later but break the loop because we've satisfied the
-        // move amount.
         if balance_taken < input_bal.amount {
-            input_balances.push_front(InputRuneBalance {
-                address: input_bal.address,
+            input_balances.push_front(InputDuneBalance {
+                address: input_bal.address.clone(),
                 amount: input_bal.amount - balance_taken,
             });
             break;
         }
-        // Have we finished moving balance?
         if total_sent == amount {
             break;
         }
@@ -220,7 +217,7 @@ pub fn move_rune_balance_to_output(
         results.push(new_sequential_ledger_entry(
             location,
             Some(total_sent),
-            *rune_id,
+            *dune_id,
             output,
             receiver_address.as_ref(),
             None,
@@ -229,7 +226,7 @@ pub fn move_rune_balance_to_output(
         ));
         try_debug!(
             ctx,
-            "{operation} {rune_id} ({total_sent}) {address} {location}",
+            "{operation} {dune_id} ({total_sent}) {address} {location}",
             operation = DbLedgerOperation::Receive.to_string(),
             address = receiver_address.as_ref().unwrap(),
         );
@@ -239,7 +236,7 @@ pub fn move_rune_balance_to_output(
         results.push(new_sequential_ledger_entry(
             location,
             Some(*balance_taken),
-            *rune_id,
+            *dune_id,
             output,
             Some(sender_address),
             receiver_address.as_ref(),
@@ -248,46 +245,46 @@ pub fn move_rune_balance_to_output(
         ));
         try_debug!(
             ctx,
-            "{operation} {rune_id} ({balance_taken}) {sender_address} -> {receiver_address:?} {location}"
+            "{operation} {dune_id} ({balance_taken}) {sender_address} -> {receiver_address:?} {location}"
         );
     }
     results
 }
 
-/// Determines if a mint is valid depending on the rune's mint terms.
-pub fn is_rune_mintable(
-    db_rune: &DbDune,
+/// Determines if a mint is valid depending on the dune's mint terms.
+pub fn is_dune_mintable(
+    db_dune: &DbDune,
     total_mints: u128,
     location: &TransactionLocation,
 ) -> bool {
-    if db_rune.cenotaph {
+    if db_dune.cenotaph {
         return false;
     }
-    if db_rune.terms_amount.is_none() {
+    if db_dune.terms_amount.is_none() {
         return false;
     }
-    if let Some(terms_cap) = db_rune.terms_cap {
+    if let Some(terms_cap) = db_dune.terms_cap {
         if total_mints >= terms_cap.0 {
             return false;
         }
     }
-    if let Some(terms_height_start) = db_rune.terms_height_start {
+    if let Some(terms_height_start) = db_dune.terms_height_start {
         if location.block_height < terms_height_start.0 {
             return false;
         }
     }
-    if let Some(terms_height_end) = db_rune.terms_height_end {
+    if let Some(terms_height_end) = db_dune.terms_height_end {
         if location.block_height > terms_height_end.0 {
             return false;
         }
     }
-    if let Some(terms_offset_start) = db_rune.terms_offset_start {
-        if location.block_height < db_rune.block_height.0 + terms_offset_start.0 {
+    if let Some(terms_offset_start) = db_dune.terms_offset_start {
+        if location.block_height < db_dune.block_height.0 + terms_offset_start.0 {
             return false;
         }
     }
-    if let Some(terms_offset_end) = db_rune.terms_offset_end {
-        if location.block_height > db_rune.block_height.0 + terms_offset_end.0 {
+    if let Some(terms_offset_end) = db_dune.terms_offset_end {
+        if location.block_height > db_dune.block_height.0 + terms_offset_end.0 {
             return false;
         }
     }
@@ -304,13 +301,10 @@ mod test {
         use doginals_parser::DuneId;
         use maplit::hashmap;
 
-        use crate::db::{
-            cache::{
-                input_rune_balance::InputRuneBalance, transaction_location::TransactionLocation,
-                utils::move_rune_balance_to_output,
-            },
-            models::db_ledger_operation::DbLedgerOperation,
-        };
+        use crate::db::cache::input_dune_balance::InputDuneBalance;
+        use crate::db::cache::transaction_location::TransactionLocation;
+        use crate::db::cache::utils::move_dune_balance_to_output;
+        use crate::db::models::db_ledger_operation::DbLedgerOperation;
 
         fn dummy_eligible_output() -> HashMap<u32, ScriptBuf> {
             hashmap! {
@@ -326,16 +320,14 @@ mod test {
             let address =
                 Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.address(address.clone()).amount(1000);
+            let mut input1 = InputDuneBalance { address: address.clone(), amount: 1000 };
             available_inputs.push_back(input1);
-            let mut input2 = InputRuneBalance::dummy();
-            input2.address(None).amount(1000);
+            let mut input2 = InputDuneBalance { address: None, amount: 1000 };
             available_inputs.push_back(input2);
             let eligible_outputs = dummy_eligible_output();
             let mut next_event_index = 0;
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(0),
                 &DuneId::new(840000, 25).unwrap(),
@@ -350,12 +342,11 @@ mod test {
             assert_eq!(receive.event_index.0, 0u32);
             assert_eq!(receive.operation, DbLedgerOperation::Receive);
             assert_eq!(receive.amount.unwrap().0, 2000u128);
-
+            // ...existing code...
             let send = results.get(1).unwrap();
             assert_eq!(send.event_index.0, 1u32);
             assert_eq!(send.operation, DbLedgerOperation::Send);
             assert_eq!(send.amount.unwrap().0, 1000u128);
-
             assert_eq!(results.len(), 2);
             assert_eq!(available_inputs.len(), 0);
         }
@@ -365,11 +356,10 @@ mod test {
             let address =
                 Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.address(address.clone()).amount(1000);
+            let mut input1 = InputDuneBalance { address: address.clone(), amount: 1000 };
             available_inputs.push_back(input1);
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 None, // Burn
                 &DuneId::new(840000, 25).unwrap(),
@@ -391,12 +381,11 @@ mod test {
         #[test]
         fn moves_partial_input_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.amount(5000); // More than required in this move.
+            let mut input1 = InputDuneBalance { address: None, amount: 5000 };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(0),
                 &DuneId::new(840000, 25).unwrap(),
@@ -422,12 +411,11 @@ mod test {
         #[test]
         fn moves_insufficient_input_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.amount(1000); // Insufficient.
+            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(0),
                 &DuneId::new(840000, 25).unwrap(),
@@ -451,18 +439,15 @@ mod test {
         #[test]
         fn moves_all_remaining_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.amount(6000);
+            let mut input1 = InputDuneBalance { address: None, amount: 6000 };
             available_inputs.push_back(input1);
-            let mut input2 = InputRuneBalance::dummy();
-            input2.amount(2000);
+            let mut input2 = InputDuneBalance { address: None, amount: 2000 };
             available_inputs.push_back(input2);
-            let mut input3 = InputRuneBalance::dummy();
-            input3.amount(2000);
+            let mut input3 = InputDuneBalance { address: None, amount: 2000 };
             available_inputs.push_back(input3);
             let eligible_outputs = dummy_eligible_output();
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(0),
                 &DuneId::new(840000, 25).unwrap(),
@@ -492,14 +477,13 @@ mod test {
         #[test]
         fn move_to_output_with_address_failure_is_burned() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.amount(1000);
+            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
             available_inputs.push_back(input1);
             let mut eligible_outputs = HashMap::new();
             // Broken script buf that yields no address.
             eligible_outputs.insert(0u32, ScriptBuf::from_hex("0101010101").unwrap());
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(0),
                 &DuneId::new(840000, 25).unwrap(),
@@ -520,12 +504,11 @@ mod test {
         #[test]
         fn move_to_nonexistent_output_is_burned() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.amount(1000);
+            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(5), // Output does not exist.
                 &DuneId::new(840000, 25).unwrap(),
@@ -546,12 +529,11 @@ mod test {
         #[test]
         fn send_not_generated_on_minted_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputRuneBalance::dummy();
-            input1.amount(1000).address(None); // No address because it's a mint.
+            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
-            let results = move_rune_balance_to_output(
+            let results = move_dune_balance_to_output(
                 &TransactionLocation::dummy(),
                 Some(0),
                 &DuneId::new(840000, 25).unwrap(),
@@ -575,8 +557,8 @@ mod test {
         use test_case::test_case;
 
         use crate::db::{
-            cache::{transaction_location::TransactionLocation, utils::is_rune_mintable},
-            models::db_rune::DbDune,
+            cache::{transaction_location::TransactionLocation, utils::is_dune_mintable},
+            models::db_dune::DbDune,
         };
 
         #[test_case(840000 => false; "early block")]
@@ -585,12 +567,12 @@ mod test {
         #[test_case(840100 => true; "first block")]
         #[test_case(840200 => true; "last block")]
         fn mint_block_height_terms_are_validated(block_height: u64) -> bool {
-            let mut rune = DbDune::factory();
-            rune.terms_height_start(Some(PgNumericU64(840100)));
-            rune.terms_height_end(Some(PgNumericU64(840200)));
+            let mut dune = DbDune::factory();
+            dune.terms_height_start(Some(PgNumericU64(840100)));
+            dune.terms_height_end(Some(PgNumericU64(840200)));
             let mut location = TransactionLocation::dummy();
             location.block_height(block_height);
-            is_rune_mintable(&rune, 0, &location)
+            is_dune_mintable(&dune, 0, &location)
         }
 
         #[test_case(840000 => false; "early block")]
@@ -599,21 +581,21 @@ mod test {
         #[test_case(840100 => true; "first block")]
         #[test_case(840200 => true; "last block")]
         fn mint_block_offset_terms_are_validated(block_height: u64) -> bool {
-            let mut rune = DbDune::factory();
-            rune.terms_offset_start(Some(PgNumericU64(100)));
-            rune.terms_offset_end(Some(PgNumericU64(200)));
+            let mut dune = DbDune::factory();
+            dune.terms_offset_start(Some(PgNumericU64(100)));
+            dune.terms_offset_end(Some(PgNumericU64(200)));
             let mut location = TransactionLocation::dummy();
             location.block_height(block_height);
-            is_rune_mintable(&rune, 0, &location)
+            is_dune_mintable(&dune, 0, &location)
         }
 
         #[test_case(0 => true; "first mint")]
         #[test_case(49 => true; "last mint")]
         #[test_case(50 => false; "out of range")]
         fn mint_cap_is_validated(cap: u128) -> bool {
-            let mut rune = DbDune::factory();
-            rune.terms_cap(Some(PgNumericU128(50)));
-            is_rune_mintable(&rune, cap, &TransactionLocation::dummy())
+            let mut dune = DbDune::factory();
+            dune.terms_cap(Some(PgNumericU128(50)));
+            is_dune_mintable(&dune, cap, &TransactionLocation::dummy())
         }
     }
 
@@ -630,7 +612,7 @@ mod test {
         #[test]
         fn increments_event_index() {
             let location = TransactionLocation::dummy();
-            let rune_id = DuneId::new(840000, 25).unwrap();
+            let dune_id = DuneId::new(840000, 25).unwrap();
             let address =
                 Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
             let mut event_index = 0u32;
@@ -638,7 +620,7 @@ mod test {
             let event0 = new_sequential_ledger_entry(
                 &location,
                 Some(100),
-                rune_id,
+                dune_id,
                 Some(0),
                 address.as_ref(),
                 None,
@@ -652,7 +634,7 @@ mod test {
             let event1 = new_sequential_ledger_entry(
                 &location,
                 Some(300),
-                rune_id,
+                dune_id,
                 Some(0),
                 None,
                 None,
@@ -670,46 +652,36 @@ mod test {
     mod input_balances {
         use std::num::NonZeroUsize;
 
-        use dogecoin::{
-            types::{
-                bitcoin::{OutPoint, TxIn},
-                TransactionIdentifier,
-            },
-            utils::Context,
-        };
+        use bitcoin::{OutPoint, TxIn, Txid, ScriptBuf, Sequence, Witness};
+        use dogecoin::utils::Context;
         use doginals_parser::DuneId;
         use lru::LruCache;
         use maplit::hashmap;
 
-        use crate::db::{
-            cache::{
-                input_rune_balance::InputRuneBalance, utils::input_rune_balances_from_tx_inputs,
-            },
-            models::{db_ledger_entry::DbLedgerEntry, db_ledger_operation::DbLedgerOperation},
-            pg_insert_ledger_entries, pg_test_client, pg_test_roll_back_migrations,
-        };
+        use crate::db::cache::input_dune_balance::InputDuneBalance;
+        use crate::db::cache::utils::input_dune_balances_from_tx_inputs;
+        use crate::db::models::db_ledger_entry::DbLedgerEntry;
+        use crate::db::models::db_ledger_operation::DbLedgerOperation;
+        use crate::db::pg_insert_ledger_entries;
+        use crate::db::pg_test_client;
+        use crate::db::pg_test_roll_back_migrations;
 
         #[tokio::test]
         async fn from_block_cache() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: TransactionIdentifier {
-                        hash: "0x045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
-                            .to_string(),
-                    },
+                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
-                    value: 100,
-                    block_height: 840000,
                 },
-                script_sig: "".to_string(),
-                sequence: 0,
-                witness: vec![],
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0),
+                witness: Witness::new(),
             }];
-            let rune_id = DuneId::new(840000, 25).unwrap();
+            let dune_id = DuneId::new(840000, 25).unwrap();
             let block_output_cache = hashmap! {
                 ("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
                             .to_string(), 1) => hashmap! {
-                                rune_id => vec![InputRuneBalance { address: None, amount: 2000 }]
+                                dune_id => vec![InputDuneBalance { address: None, amount: 2000 }]
                             }
             };
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
@@ -717,8 +689,8 @@ mod test {
 
             let mut pg_client = pg_test_client(true, &ctx).await;
             let mut db_tx = pg_client.transaction().await.unwrap();
-            let results = input_rune_balances_from_tx_inputs(
-                &inputs,
+            let results = input_dune_balances_from_tx_inputs(
+                inputs.as_slice(),
                 &block_output_cache,
                 &mut output_cache,
                 &mut db_tx,
@@ -729,10 +701,10 @@ mod test {
             pg_test_roll_back_migrations(&mut pg_client, &ctx).await;
 
             assert_eq!(results.len(), 1);
-            let rune_results = results.get(&rune_id).unwrap();
-            assert_eq!(rune_results.len(), 1);
-            let input_bal = rune_results.get(0).unwrap();
-            assert_eq!(input_bal.address, None);
+            let dune_results = results.get(&dune_id).unwrap();
+            assert_eq!(dune_results.len(), 1);
+            let input_bal = dune_results.get(0).unwrap();
+            assert_eq!(input_bal.address, Option::<String>::None);
             assert_eq!(input_bal.amount, 2000);
         }
 
@@ -740,19 +712,14 @@ mod test {
         async fn from_lru_cache() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: TransactionIdentifier {
-                        hash: "0x045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
-                            .to_string(),
-                    },
+                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
-                    value: 100,
-                    block_height: 840000,
                 },
-                script_sig: "".to_string(),
-                sequence: 0,
-                witness: vec![],
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0),
+                witness: Witness::new(),
             }];
-            let rune_id = DuneId::new(840000, 25).unwrap();
+            let dune_id = DuneId::new(840000, 25).unwrap();
             let block_output_cache = hashmap! {};
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
             output_cache.put(
@@ -761,15 +728,15 @@ mod test {
                     1,
                 ),
                 hashmap! {
-                    rune_id => vec![InputRuneBalance { address: None, amount: 2000 }]
+                    dune_id => vec![InputDuneBalance { address: None, amount: 2000 }]
                 },
             );
             let ctx = Context::empty();
 
             let mut pg_client = pg_test_client(true, &ctx).await;
             let mut db_tx = pg_client.transaction().await.unwrap();
-            let results = input_rune_balances_from_tx_inputs(
-                &inputs,
+            let results = input_dune_balances_from_tx_inputs(
+                inputs.as_slice(),
                 &block_output_cache,
                 &mut output_cache,
                 &mut db_tx,
@@ -780,10 +747,10 @@ mod test {
             pg_test_roll_back_migrations(&mut pg_client, &ctx).await;
 
             assert_eq!(results.len(), 1);
-            let rune_results = results.get(&rune_id).unwrap();
-            assert_eq!(rune_results.len(), 1);
-            let input_bal = rune_results.get(0).unwrap();
-            assert_eq!(input_bal.address, None);
+            let dune_results = results.get(&dune_id).unwrap();
+            assert_eq!(dune_results.len(), 1);
+            let input_bal = dune_results.get(0).unwrap();
+            assert_eq!(input_bal.address, Option::<String>::None);
             assert_eq!(input_bal.amount, 2000);
         }
 
@@ -791,19 +758,14 @@ mod test {
         async fn from_db() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: TransactionIdentifier {
-                        hash: "0x045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
-                            .to_string(),
-                    },
+                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
-                    value: 100,
-                    block_height: 840000,
                 },
-                script_sig: "".to_string(),
-                sequence: 0,
-                witness: vec![],
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0),
+                witness: Witness::new(),
             }];
-            let rune_id = DuneId::new(840000, 25).unwrap();
+            let dune_id = DuneId::new(840000, 25).unwrap();
             let block_output_cache = hashmap! {};
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
             let ctx = Context::empty();
@@ -813,7 +775,7 @@ mod test {
 
             let entry = DbLedgerEntry::from_values(
                 Some(2000),
-                rune_id,
+                dune_id,
                 &"0x0000000000000000000044642cc1f64c22579d46a2a149ef2a51f9c98cb622e1".to_string(),
                 840000,
                 0,
@@ -827,8 +789,8 @@ mod test {
             );
             let _ = pg_insert_ledger_entries(&vec![entry], &mut db_tx, &ctx).await;
 
-            let results = input_rune_balances_from_tx_inputs(
-                &inputs,
+            let results = input_dune_balances_from_tx_inputs(
+                inputs.as_slice(),
                 &block_output_cache,
                 &mut output_cache,
                 &mut db_tx,
@@ -839,10 +801,10 @@ mod test {
             pg_test_roll_back_migrations(&mut pg_client, &ctx).await;
 
             assert_eq!(results.len(), 1);
-            let rune_results = results.get(&rune_id).unwrap();
-            assert_eq!(rune_results.len(), 1);
-            let input_bal = rune_results.get(0).unwrap();
-            assert_eq!(input_bal.address, None);
+            let dune_results = results.get(&dune_id).unwrap();
+            assert_eq!(dune_results.len(), 1);
+            let input_bal = dune_results.get(0).unwrap();
+            assert_eq!(input_bal.address, Option::<String>::None);
             assert_eq!(input_bal.amount, 2000);
         }
 
@@ -850,17 +812,12 @@ mod test {
         async fn inputs_without_balances() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: TransactionIdentifier {
-                        hash: "0x045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
-                            .to_string(),
-                    },
+                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
-                    value: 100,
-                    block_height: 840000,
                 },
-                script_sig: "".to_string(),
-                sequence: 0,
-                witness: vec![],
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence(0),
+                witness: Witness::new(),
             }];
             let block_output_cache = hashmap! {};
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
@@ -868,8 +825,8 @@ mod test {
 
             let mut pg_client = pg_test_client(true, &ctx).await;
             let mut db_tx = pg_client.transaction().await.unwrap();
-            let results = input_rune_balances_from_tx_inputs(
-                &inputs,
+            let results = input_dune_balances_from_tx_inputs(
+                inputs.as_slice(),
                 &block_output_cache,
                 &mut output_cache,
                 &mut db_tx,
@@ -890,17 +847,16 @@ mod test {
         use lru::LruCache;
         use maplit::hashmap;
 
-        use crate::db::cache::{
-            input_rune_balance::InputRuneBalance, utils::move_block_output_cache_to_output_cache,
-        };
+        use crate::db::cache::input_dune_balance::InputDuneBalance;
+        use crate::db::cache::utils::move_block_output_cache_to_output_cache;
 
         #[test]
         fn moves_to_lru_output_cache_and_clears() {
-            let rune_id = DuneId::new(840000, 25).unwrap();
+            let dune_id = DuneId::new(840000, 25).unwrap();
             let mut block_output_cache = hashmap! {
                 ("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
                             .to_string(), 1) => hashmap! {
-                                rune_id => vec![InputRuneBalance { address: None, amount: 2000 }]
+                                dune_id => vec![InputDuneBalance { address: None, amount: 2000 }]
                             }
             };
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
@@ -914,10 +870,10 @@ mod test {
                 ))
                 .unwrap();
             assert_eq!(moved_val.len(), 1);
-            let balances = moved_val.get(&rune_id).unwrap();
+            let balances = moved_val.get(&dune_id).unwrap();
             assert_eq!(balances.len(), 1);
             let balance = balances.get(0).unwrap();
-            assert_eq!(balance.address, None);
+            assert_eq!(balance.address, Option::<String>::None);
             assert_eq!(balance.amount, 2000);
             assert_eq!(block_output_cache.len(), 0);
         }

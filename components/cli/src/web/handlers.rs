@@ -526,11 +526,11 @@ pub async fn get_dunes_tokens(
                     COALESCE(sc.total_mints, 0)::bigint AS mints,
                     COALESCE(sc.burned, 0)::text AS burned,
                     r.divisibility::int AS divisibility
-             FROM runes r
+             FROM dunes r
              LEFT JOIN LATERAL (
                  SELECT total_mints, burned
                  FROM supply_changes
-                 WHERE rune_id = r.id
+                 WHERE dune_id = r.id
                  ORDER BY block_height DESC
                  LIMIT 1
              ) sc ON TRUE
@@ -809,7 +809,7 @@ pub async fn get_dogemap_claims(
 async fn fetch_node_telemetry(config: config::DogecoinConfig) -> NodeTelemetry {
     tokio::task::spawn_blocking(move || {
         let ctx = dogecoin::utils::Context::empty();
-        let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&config, &ctx);
+        let rpc = dogecoin::utils::dogecoind::dogecoin_get_client(&config, &ctx);
         let block_height = rpc.get_block_count().ok();
         let blockchain_info = rpc.get_blockchain_info().ok();
         let mempool_info = rpc.get_mempool_info().ok();
@@ -1340,7 +1340,7 @@ fn fetch_envelopes(
     txid_str: &str,
 ) -> Result<(Vec<ParsedEnvelope>, String), String> {
     let ctx = dogecoin::utils::Context::empty();
-    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(dogecoin_config, &ctx);
+    let rpc = dogecoin::utils::dogecoind::dogecoin_get_client(dogecoin_config, &ctx);
     let txid: dogecoin::bitcoincore_rpc::bitcoin::Txid = txid_str
         .parse()
         .map_err(|e| format!("Invalid txid '{}': {}", txid_str, e))?;
@@ -2017,7 +2017,7 @@ async fn marketplace_verify_message_signature(
     signature: &str,
 ) -> Result<(), Response> {
     let ctx = dogecoin::utils::Context::empty();
-    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
+    let rpc = dogecoin::utils::dogecoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
     let verified = rpc
         .call::<bool>(
             "verifymessage",
@@ -2321,7 +2321,7 @@ async fn marketplace_broadcast_raw_transaction(
     raw_tx_hex: &str,
 ) -> Result<String, Response> {
     let ctx = dogecoin::utils::Context::empty();
-    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
+    let rpc = dogecoin::utils::dogecoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
     rpc.call::<String>(
         "sendrawtransaction",
         &[serde_json::to_value(raw_tx_hex).unwrap_or(serde_json::Value::Null)],
@@ -2340,7 +2340,7 @@ async fn marketplace_fetch_tx_status(
     txid: &str,
 ) -> Result<serde_json::Value, Response> {
     let ctx = dogecoin::utils::Context::empty();
-    let rpc = dogecoin::utils::bitcoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
+    let rpc = dogecoin::utils::dogecoind::dogecoin_get_client(&state.dogecoin_config, &ctx);
     let response = rpc
         .call::<serde_json::Value>(
             "getrawtransaction",

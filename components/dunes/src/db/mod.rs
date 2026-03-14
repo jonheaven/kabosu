@@ -1,12 +1,12 @@
 use std::{collections::HashMap, process, str::FromStr};
 
-use cache::input_rune_balance::InputRuneBalance;
+use crate::db::cache::input_dune_balance::InputDuneBalance;
 use config::Config;
 use deadpool_postgres::GenericClient;
 use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
 use doginals_parser::DuneId;
 use models::{
-    db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry, db_rune::DbDune,
+    db_balance_change::DbBalanceChange, db_ledger_entry::DbLedgerEntry, db_dune::DbDune,
     db_supply_change::DbSupplyChange,
 };
 use postgres::{
@@ -87,7 +87,7 @@ pub async fn pg_insert_dunes(
             )
             .await
         {
-            try_error!(ctx, "Error inserting rune: {:?}", e);
+            try_error!(ctx, "Error inserting dune: {:?}", e);
             process::exit(1);
         }
     }
@@ -118,7 +118,7 @@ pub async fn pg_insert_supply_changes(
                 .as_str(),
             );
             arg_num += 7;
-            params.push(&row.rune_id);
+            params.push(&row.dune_id);
             params.push(&row.block_height);
             params.push(&row.minted);
             params.push(&row.total_mints);
@@ -130,15 +130,15 @@ pub async fn pg_insert_supply_changes(
         match db_tx
             .query(
                 &format!("
-                WITH changes (rune_id, block_height, minted, total_mints, burned, total_burns, total_operations) AS (VALUES {}),
+                WITH changes (dune_id, block_height, minted, total_mints, burned, total_burns, total_operations) AS (VALUES {}),
                 previous AS (
-                    SELECT DISTINCT ON (rune_id) *
+                    SELECT DISTINCT ON (dune_id) *
                     FROM supply_changes
-                    WHERE rune_id IN (SELECT rune_id FROM changes)
-                    ORDER BY rune_id, block_height DESC
+                    WHERE dune_id IN (SELECT dune_id FROM changes)
+                    ORDER BY dune_id, block_height DESC
                 ),
                 inserts AS (
-                    SELECT c.rune_id,
+                    SELECT c.dune_id,
                         c.block_height,
                         COALESCE(p.minted, 0) + c.minted AS minted,
                         COALESCE(p.total_mints, 0) + c.total_mints AS total_mints,
@@ -146,11 +146,11 @@ pub async fn pg_insert_supply_changes(
                         COALESCE(p.total_burns, 0) + c.total_burns AS total_burns,
                         COALESCE(p.total_operations, 0) + c.total_operations AS total_operations
                     FROM changes AS c
-                    LEFT JOIN previous AS p ON c.rune_id = p.rune_id
+                    LEFT JOIN previous AS p ON c.dune_id = p.dune_id
                 )
-                INSERT INTO supply_changes (rune_id, block_height, minted, total_mints, burned, total_burns, total_operations)
+                INSERT INTO supply_changes (dune_id, block_height, minted, total_mints, burned, total_burns, total_operations)
                 (SELECT * FROM inserts)
-                ON CONFLICT (rune_id, block_height) DO UPDATE SET
+                ON CONFLICT (dune_id, block_height) DO UPDATE SET
                     minted = EXCLUDED.minted,
                     total_mints = EXCLUDED.total_mints,
                     burned = EXCLUDED.burned,
@@ -195,7 +195,7 @@ pub async fn pg_insert_balance_changes(
                 .as_str(),
             );
             arg_num += 5;
-            params.push(&row.rune_id);
+            params.push(&row.dune_id);
             params.push(&row.block_height);
             params.push(&row.address);
             params.push(&row.balance);
@@ -204,22 +204,22 @@ pub async fn pg_insert_balance_changes(
         arg_str.pop();
         match db_tx
             .query(
-                &format!("WITH changes (rune_id, block_height, address, balance, total_operations) AS (VALUES {}),
+                &format!("WITH changes (dune_id, block_height, address, balance, total_operations) AS (VALUES {}),
                 previous AS (
-                    SELECT DISTINCT ON (rune_id, address) *
+                    SELECT DISTINCT ON (dune_id, address) *
                     FROM balance_changes
-                    WHERE (rune_id, address) IN (SELECT rune_id, address FROM changes)
-                    ORDER BY rune_id, address, block_height DESC
+                    WHERE (dune_id, address) IN (SELECT dune_id, address FROM changes)
+                    ORDER BY dune_id, address, block_height DESC
                 ),
                 inserts AS (
-                    SELECT c.rune_id, c.block_height, c.address, COALESCE(p.balance, 0) {} c.balance AS balance,
+                    SELECT c.dune_id, c.block_height, c.address, COALESCE(p.balance, 0) {} c.balance AS balance,
                         COALESCE(p.total_operations, 0) + c.total_operations AS total_operations
                     FROM changes AS c
-                    LEFT JOIN previous AS p ON c.rune_id = p.rune_id AND c.address = p.address
+                    LEFT JOIN previous AS p ON c.dune_id = p.dune_id AND c.address = p.address
                 )
-                INSERT INTO balance_changes (rune_id, block_height, address, balance, total_operations)
+                INSERT INTO balance_changes (dune_id, block_height, address, balance, total_operations)
                 (SELECT * FROM inserts)
-                ON CONFLICT (rune_id, block_height, address) DO UPDATE SET
+                ON CONFLICT (dune_id, block_height, address) DO UPDATE SET
                     balance = EXCLUDED.balance,
                     total_operations = EXCLUDED.total_operations", arg_str, sign),
                 &params,
@@ -253,7 +253,7 @@ pub async fn pg_insert_ledger_entries(
             arg_str.pop();
             arg_str.push_str("),");
             arg_num += 12;
-            params.push(&row.rune_id);
+            params.push(&row.dune_id);
             params.push(&row.block_hash);
             params.push(&row.block_height);
             params.push(&row.tx_index);
@@ -270,7 +270,7 @@ pub async fn pg_insert_ledger_entries(
         match db_tx
             .query(
                 &format!("INSERT INTO ledger
-                    (rune_id, block_hash, block_height, tx_index, event_index, tx_id, output, address, receiver_address, amount,
+                    (dune_id, block_hash, block_height, tx_index, event_index, tx_id, output, address, receiver_address, amount,
                     operation, timestamp)
                     VALUES {}", arg_str),
                 &params,
@@ -311,18 +311,18 @@ pub async fn pg_roll_back_block(block_height: u64, db_tx: &mut Transaction<'_>, 
         .expect("error rolling back ledger");
     db_tx
         .execute(
-            "DELETE FROM runes WHERE block_height = $1",
+            "DELETE FROM dunes WHERE block_height = $1",
             &[&PgNumericU64(block_height)],
         )
         .await
-        .expect("error rolling back runes");
+        .expect("error rolling back dunes");
 }
 
-pub async fn pg_get_max_rune_number<T: GenericClient>(client: &T) -> u32 {
+pub async fn pg_get_max_dune_number<T: GenericClient>(client: &T) -> u32 {
     let row = client
-        .query_opt("SELECT MAX(number) AS max FROM runes", &[])
+        .query_opt("SELECT MAX(number) AS max FROM dunes", &[])
         .await
-        .expect("error getting max rune number");
+        .expect("error getting max dune number");
     let Some(row) = row else {
         return 0;
     };
@@ -359,18 +359,18 @@ pub async fn get_chain_tip<T: GenericClient>(client: &T) -> Option<BlockIdentifi
     })
 }
 
-pub async fn pg_get_rune_by_id(
+pub async fn pg_get_dune_by_id(
     id: &DuneId,
     db_tx: &mut Transaction<'_>,
     ctx: &Context,
 ) -> Option<DbDune> {
     let row = match db_tx
-        .query_opt("SELECT * FROM runes WHERE id = $1", &[&id.to_string()])
+        .query_opt("SELECT * FROM dunes WHERE id = $1", &[&id.to_string()])
         .await
     {
         Ok(row) => row,
         Err(e) => {
-            try_error!(ctx, "error retrieving rune: {}", e.to_string());
+            try_error!(ctx, "error retrieving dune: {}", e.to_string());
             process::exit(1);
         }
     };
@@ -378,14 +378,14 @@ pub async fn pg_get_rune_by_id(
     Some(DbDune::from_pg_row(&row))
 }
 
-pub async fn pg_get_rune_total_mints(
+pub async fn pg_get_dune_total_mints(
     id: &DuneId,
     db_tx: &mut Transaction<'_>,
     ctx: &Context,
 ) -> Option<u128> {
     let row = match db_tx
         .query_opt(
-            "SELECT total_mints FROM supply_changes WHERE rune_id = $1 ORDER BY block_height DESC LIMIT 1",
+            "SELECT total_mints FROM supply_changes WHERE dune_id = $1 ORDER BY block_height DESC LIMIT 1",
             &[&id.to_string()],
         )
         .await
@@ -394,7 +394,7 @@ pub async fn pg_get_rune_total_mints(
         Err(e) => {
             try_error!(
                 ctx,
-                "error retrieving rune minted total: {}",
+                "error retrieving dune minted total: {}",
                 e.to_string()
             );
             process::exit(1);
@@ -405,14 +405,14 @@ pub async fn pg_get_rune_total_mints(
     Some(minted.0)
 }
 
-/// Retrieves the rune balance for an array of transaction inputs represented by `(vin, tx_id, vout)` where `vin` is the index of
+/// Retrieves the dune balance for an array of transaction inputs represented by `(vin, tx_id, vout)` where `vin` is the index of
 /// this transaction input, `tx_id` is the transaction ID that produced this input and `vout` is the output index of this previous
 /// tx.
-pub async fn pg_get_input_rune_balances(
+pub async fn pg_get_input_dune_balances(
     outputs: Vec<(u32, String, u32)>,
     db_tx: &mut Transaction<'_>,
     ctx: &Context,
-) -> HashMap<u32, HashMap<DuneId, Vec<InputRuneBalance>>> {
+) -> HashMap<u32, HashMap<DuneId, Vec<InputDuneBalance>>> {
     // Instead of preparing a statement and running it thousands of times, pull all rows with 1 query.
     let mut arg_num = 1;
     let mut args = String::new();
@@ -441,7 +441,7 @@ pub async fn pg_get_input_rune_balances(
         .query(
             format!(
                 "WITH inputs (index, tx_id, output) AS (VALUES {})
-                SELECT i.index, l.rune_id, l.address, l.amount
+                SELECT i.index, l.dune_id, l.address, l.amount
                 FROM ledger AS l
                 INNER JOIN inputs AS i USING (tx_id, output)
                 WHERE l.operation = 'receive'",
@@ -456,32 +456,32 @@ pub async fn pg_get_input_rune_balances(
         Err(e) => {
             try_error!(
                 ctx,
-                "error retrieving output rune balances: {}",
+                "error retrieving output dune balances: {}",
                 e.to_string()
             );
             process::exit(1);
         }
     };
-    let mut results: HashMap<u32, HashMap<DuneId, Vec<InputRuneBalance>>> = HashMap::new();
+    let mut results: HashMap<u32, HashMap<DuneId, Vec<InputDuneBalance>>> = HashMap::new();
     for row in rows.iter() {
         let key: PgBigIntU32 = row.get("index");
-        let rune_str: String = row.get("rune_id");
-        let rune_id = DuneId::from_str(rune_str.as_str()).unwrap();
+        let dune_str: String = row.get("dune_id");
+        let dune_id = DuneId::from_str(dune_str.as_str()).unwrap();
         let address: Option<String> = row.get("address");
         let amount: PgNumericU128 = row.get("amount");
-        let input_bal = InputRuneBalance {
+        let input_bal = InputDuneBalance {
             address,
             amount: amount.0,
         };
         if let Some(input) = results.get_mut(&key.0) {
-            if let Some(rune_bal) = input.get_mut(&rune_id) {
-                rune_bal.push(input_bal);
+            if let Some(dune_bal) = input.get_mut(&dune_id) {
+                dune_bal.push(input_bal);
             } else {
-                input.insert(rune_id, vec![input_bal]);
+                input.insert(dune_id, vec![input_bal]);
             }
         } else {
             let mut map = HashMap::new();
-            map.insert(rune_id, vec![input_bal]);
+            map.insert(dune_id, vec![input_bal]);
             results.insert(key.0, map);
         }
     }

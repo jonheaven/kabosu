@@ -19,7 +19,7 @@ use crate::{
         BlockHeader, BlockIdentifier, DogecoinBlockData, DogecoinBlockMetadata, DogecoinNetwork,
         DogecoinTransactionData, DogecoinTransactionMetadata, TransactionIdentifier,
     },
-    utils::{bitcoind::dogecoin_get_client, Context},
+    utils::{dogecoind::dogecoin_get_client, Context},
 };
 
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
@@ -598,7 +598,7 @@ pub(crate) fn standardize_dogecoin_block(
             metadata: DogecoinTransactionMetadata {
                 inputs,
                 outputs,
-                ordinal_operations: vec![],
+                doginal_operations: vec![],
                 drc20_operation: None,
                 proof: None,
                 fee: sats_in.saturating_sub(sats_out),

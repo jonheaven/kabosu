@@ -7,7 +7,7 @@ edition = "2021"
 dogecoin = { path = "../dogecoin" }
 bitcoin = { workspace = true }
 lru = "0.12.3"
-# Dogecoin's ordinals parser — use the doginals crate from our workspace
+# Dogecoin's doginals parser — use the doginals crate from our workspace
 doginals-parser = { package = "doginals", path = "../doginals" }
 bytes = "1.3"
 config = { path = "../config" }

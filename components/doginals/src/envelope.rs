@@ -277,7 +277,7 @@ impl RawEnvelope {
     ///
     /// The scriptSig contains a sequence of data-push operations. We scan for a
     /// push whose value is exactly `PROTOCOL_ID` (b"ord") and then treat all
-    /// subsequent pushes as the envelope payload using the standard ordinals
+    /// subsequent pushes as the envelope payload using the standard doginals
     /// tag-value format (field tag / field value alternating, empty tag marks
     /// body start — identical to Bitcoin's envelope payload layout).
     pub fn from_transactions_dogecoin(txs: &[Transaction]) -> Vec<Self> {

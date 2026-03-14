@@ -1,5 +1,5 @@
 CREATE TABLE current_locations (
-    ordinal_number NUMERIC NOT NULL PRIMARY KEY,
+    doginal_number NUMERIC NOT NULL PRIMARY KEY,
     block_height NUMERIC NOT NULL,
     tx_id TEXT NOT NULL,
     tx_index BIGINT NOT NULL,

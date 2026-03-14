@@ -1,9 +1,9 @@
 use postgres::types::{PgNumericU128, PgNumericU64};
 
-/// An update to a rune that affects its total counts.
+/// An update to a dune that affects its total counts.
 #[derive(Debug, Clone)]
 pub struct DbSupplyChange {
-    pub rune_id: String,
+    pub dune_id: String,
     pub block_height: PgNumericU64,
     pub minted: PgNumericU128,
     pub total_mints: PgNumericU128,
@@ -15,7 +15,7 @@ pub struct DbSupplyChange {
 impl DbSupplyChange {
     pub fn from_mint(id: String, block_height: PgNumericU64, amount: PgNumericU128) -> Self {
         DbSupplyChange {
-            rune_id: id,
+            dune_id: id,
             block_height,
             minted: amount,
             total_mints: PgNumericU128(1),
@@ -27,7 +27,7 @@ impl DbSupplyChange {
 
     pub fn from_burn(id: String, block_height: PgNumericU64, amount: PgNumericU128) -> Self {
         DbSupplyChange {
-            rune_id: id,
+            dune_id: id,
             block_height,
             minted: PgNumericU128(0),
             total_mints: PgNumericU128(0),
@@ -39,7 +39,7 @@ impl DbSupplyChange {
 
     pub fn from_operation(id: String, block_height: PgNumericU64) -> Self {
         DbSupplyChange {
-            rune_id: id,
+            dune_id: id,
             block_height,
             minted: PgNumericU128(0),
             total_mints: PgNumericU128(0),

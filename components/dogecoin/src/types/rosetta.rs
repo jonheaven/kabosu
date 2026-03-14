@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 
 use super::{
     dogecoin::{TxIn, TxOut},
-    Drc20Operation, OrdinalOperation,
+    Drc20Operation, DoginalOperation,
 };
 
 /// BlockIdentifier uniquely identifies a block in a particular network.
@@ -117,7 +117,7 @@ pub struct DogecoinTransactionData {
 pub struct DogecoinTransactionMetadata {
     pub inputs: Vec<TxIn>,
     pub outputs: Vec<TxOut>,
-    pub ordinal_operations: Vec<OrdinalOperation>,
+    pub doginal_operations: Vec<DoginalOperation>,
     pub drc20_operation: Option<Drc20Operation>,
     pub proof: Option<String>,
     pub fee: u64,
