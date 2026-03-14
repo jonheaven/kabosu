@@ -1,15 +1,17 @@
+use dogecoin::types::dogecoin::TxIn;
+use tokio_postgres::Transaction;
+use bitcoin::{ScriptBuf, Address};
 use crate::db::cache::transaction_location::TransactionLocation;
 use std::collections::{HashMap, VecDeque};
-
-use bitcoin::{Address, ScriptBuf};
 use dogecoin::{try_debug, try_warn, utils::Context};
 use doginals_parser::DuneId;
 use lru::LruCache;
-
 use super::input_dune_balance::InputDuneBalance;
 use crate::db::models::db_ledger_operation::DbLedgerOperation;
 use crate::db::models::db_ledger_entry::DbLedgerEntry;
 use crate::db::models::db_dune::DbDune;
+use crate::db::pg_get_input_dune_balances;
+
 // ...existing code...
 // ...existing code...
 // ...existing code...
@@ -48,7 +50,7 @@ pub async fn input_dune_balances_from_tx_inputs(
         } else if let Some(map) = output_cache.get(&k) {
             indexed_input_dunes.insert(i as u32, map.clone());
         } else {
-            cache_misses.push((i as u32, tx_id, vout));
+            cache_misses.push((i as u32, tx_id.hash.clone(), vout));
         }
     }
     // Look for cache misses in database. We don't need to `flush` the DB cache here because we've already looked in the current

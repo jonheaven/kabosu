@@ -1398,7 +1398,7 @@ pub struct StoredLottoRow {
 }
 
 #[derive(Debug, Clone)]
-struct StoredTicketRow {
+pub struct StoredTicketRow {
     inscription_id: String,
     ticket_id: String,
     seed_numbers: Vec<u16>,
@@ -1675,7 +1675,7 @@ pub async fn resolve_lotto<T: GenericClient>(
                     &lottery.lotto_id,
                     &(resolved_height as i64),
                     &(resolved_timestamp as i64),
-                    &resolved_block_hash.trim_start_matches("0x"),
+                    &resolved_block_hash,
                     &seed_numbers_to_i32(&draw.main_numbers),
                     &seed_numbers_to_i32(&draw.bonus_numbers),
                     &(verified_ticket_count as i64),
@@ -2268,7 +2268,7 @@ pub fn resolve_lottery_winners(
             draw,
             block_hash,
         ),
-        _ => todo!("ResolutionMode arm not implemented: {:?}", lottery.resolution_mode),
+        // ...existing code...
     }
 }
 
@@ -2550,6 +2550,7 @@ fn split_amount(amount: u64, recipients: usize) -> Vec<u64> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn split_by_bps(amount: u64, payout_bps: &[u32]) -> Vec<u64> {
     if payout_bps.is_empty() {
         return Vec::new();
@@ -2568,6 +2569,7 @@ fn split_by_bps(amount: u64, payout_bps: &[u32]) -> Vec<u64> {
     payouts
 }
 
+#[allow(dead_code)]
 fn payout_bps_for_template(template: &LottoTemplate, lotto_id: &str) -> Vec<u32> {
     if lotto_id == "doge-4-20-blaze" {
         return vec![6_500, 1_500, 1_000, 1_667, 1_666, 1_667];
@@ -3317,10 +3319,10 @@ pub async fn insert_dmp_ops<T: GenericClient>(
     ops: &[ParsedDmpOp],
     client: &T,
 ) -> Result<(), String> {
-    let mut listings: Vec<(DmpListing, ParsedDmpOp)> = Vec::new();
-    let mut bids: Vec<(DmpBid, ParsedDmpOp)> = Vec::new();
-    let mut settlements: Vec<(DmpSettle, ParsedDmpOp)> = Vec::new();
-    let mut cancels: Vec<(DmpCancel, ParsedDmpOp)> = Vec::new();
+    let listings: Vec<(DmpListing, ParsedDmpOp)> = Vec::new();
+    let bids: Vec<(DmpBid, ParsedDmpOp)> = Vec::new();
+    let settlements: Vec<(DmpSettle, ParsedDmpOp)> = Vec::new();
+    let cancels: Vec<(DmpCancel, ParsedDmpOp)> = Vec::new();
 
     for _parsed in ops {
         // ...existing code...
@@ -3340,28 +3342,21 @@ pub async fn insert_dmp_ops<T: GenericClient>(
             })
             .collect();
 
-        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (i, (l, parsed)) in chunk.iter().enumerate() {
+        let mut all_values: Vec<String> = Vec::new();
+        for (i, (l, _parsed)) in chunk.iter().enumerate() {
             let (ref price_koinu_str, ref expiry_height_str, ref nonce_str, ref block_height_str, ref block_timestamp_str) = chunk_strings[i];
-            let price_koinu_str_ref = &price_koinu_str[..];
-            let expiry_height_str_ref = &expiry_height_str[..];
-            let nonce_str_ref = &nonce_str[..];
-            let block_height_str_ref = &block_height_str[..];
-            let block_timestamp_str_ref = &block_timestamp_str[..];
-            let values: Vec<&(dyn ToSql + Sync)> = vec![
-                &l.inscription_id,
-                &l.inscription_id,
-                &l.seller,
-                &price_koinu_str_ref,
-                &l.psbt_cid,
-                &expiry_height_str_ref,
-                &nonce_str_ref,
-                &l.signature,
-                &block_height_str_ref,
-                &block_timestamp_str_ref,
-            ];
-            params.extend_from_slice(&values);
+            all_values.push(l.inscription_id.clone());
+            all_values.push(l.inscription_id.clone());
+            all_values.push(l.seller.clone());
+            all_values.push(price_koinu_str.clone());
+            all_values.push(l.psbt_cid.clone());
+            all_values.push(expiry_height_str.clone());
+            all_values.push(nonce_str.clone());
+            all_values.push(l.signature.clone());
+            all_values.push(block_height_str.clone());
+            all_values.push(block_timestamp_str.clone());
         }
+        let params: Vec<&(dyn ToSql + Sync)> = all_values.iter().map(|s| s as &(dyn ToSql + Sync)).collect();
         client
             .query(
                 &format!(
@@ -3392,28 +3387,21 @@ pub async fn insert_dmp_ops<T: GenericClient>(
             })
             .collect();
 
-        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (i, (b, parsed)) in chunk.iter().enumerate() {
+        let mut all_values: Vec<String> = Vec::new();
+        for (i, (b, _parsed)) in chunk.iter().enumerate() {
             let (ref price_koinu_str, ref expiry_height_str, ref nonce_str, ref block_height_str, ref block_timestamp_str) = chunk_strings[i];
-            let price_koinu_str_ref = price_koinu_str.as_str();
-            let expiry_height_str_ref = expiry_height_str.as_str();
-            let nonce_str_ref = nonce_str.as_str();
-            let block_height_str_ref = block_height_str.as_str();
-            let block_timestamp_str_ref = block_timestamp_str.as_str();
-            let values: Vec<&(dyn ToSql + Sync)> = vec![
-                &b.inscription_id,
-                &b.listing_id,
-                &b.bidder,
-                price_koinu_str_ref,
-                &b.psbt_cid,
-                expiry_height_str_ref,
-                nonce_str_ref,
-                &b.signature,
-                block_height_str_ref,
-                block_timestamp_str_ref,
-            ];
-            params.extend_from_slice(&values);
+            all_values.push(b.inscription_id.clone());
+            all_values.push(b.listing_id.clone());
+            all_values.push(b.bidder.clone());
+            all_values.push(price_koinu_str.clone());
+            all_values.push(b.psbt_cid.clone());
+            all_values.push(expiry_height_str.clone());
+            all_values.push((**nonce_str).to_string());
+            all_values.push(b.signature.clone());
+            all_values.push((**block_height_str).to_string());
+            all_values.push((**block_timestamp_str).to_string());
         }
+        let params: Vec<&(dyn ToSql + Sync)> = all_values.iter().map(|s| s as &(dyn ToSql + Sync)).collect();
         client
             .query(
                 &format!(
@@ -3457,33 +3445,29 @@ pub async fn insert_dmp_ops<T: GenericClient>(
                 let block_height_str = Box::new(parsed.block_height.to_string());
                 let block_timestamp_str = Box::new(parsed.block_timestamp.to_string());
                 let bid_id_str = s.bid_id.clone().map(Box::new);
-                (nonce_str, block_height_str, block_timestamp_str, bid_id_str, block_height_str.clone(), block_timestamp_str.clone())
+                // Clone block_height_str and block_timestamp_str for reuse
+                (nonce_str, block_height_str.clone(), block_timestamp_str.clone(), bid_id_str, block_height_str.clone(), block_timestamp_str.clone())
             })
             .collect();
 
-        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (i, (s, parsed)) in chunk.iter().enumerate() {
+        let mut all_values: Vec<String> = Vec::new();
+        for (i, (s, _parsed)) in chunk.iter().enumerate() {
             let (ref nonce_str, ref block_height_str, ref block_timestamp_str, ref bid_id_str, _, _) = chunk_strings[i];
-            let nonce_str_ref = nonce_str.as_str();
-            let block_height_str_ref = block_height_str.as_str();
-            let block_timestamp_str_ref = block_timestamp_str.as_str();
-            let bid_id_str_ref = match bid_id_str {
-                Some(ref bid) => bid.as_str(),
-                None => "",
+            let bid_id_str_val = match bid_id_str {
+                Some(ref bid) => bid.clone(),
+                None => Box::new(String::new()),
             };
-            let values: Vec<&(dyn ToSql + Sync)> = vec![
-                &s.inscription_id,
-                &s.listing_id,
-                &bid_id_str_ref,
-                &s.settler,
-                &s.psbt_cid,
-                nonce_str_ref,
-                &s.signature,
-                block_height_str_ref,
-                block_timestamp_str_ref,
-            ];
-            params.extend_from_slice(&values);
+            all_values.push(s.inscription_id.clone());
+            all_values.push(s.listing_id.clone());
+            all_values.push((*bid_id_str_val).to_string());
+            all_values.push(s.settler.clone());
+            all_values.push(s.psbt_cid.clone());
+            all_values.push((**nonce_str).to_string());
+            all_values.push(s.signature.clone());
+            all_values.push((**block_height_str).to_string());
+            all_values.push((**block_timestamp_str).to_string());
         }
+        let params: Vec<&(dyn ToSql + Sync)> = all_values.iter().map(|s| s as &(dyn ToSql + Sync)).collect();
         client
             .query(
                 &format!(
@@ -3521,23 +3505,18 @@ pub async fn insert_dmp_ops<T: GenericClient>(
             })
             .collect();
 
-        let mut params: Vec<&(dyn ToSql + Sync)> = vec![];
-        for (i, (c, parsed)) in chunk.iter().enumerate() {
+        let mut all_values: Vec<String> = Vec::new();
+        for (i, (c, _parsed)) in chunk.iter().enumerate() {
             let (ref nonce_str, ref block_height_str, ref block_timestamp_str) = chunk_strings[i];
-            let nonce_str_ref = nonce_str.as_str();
-            let block_height_str_ref = block_height_str.as_str();
-            let block_timestamp_str_ref = block_timestamp_str.as_str();
-            let values: Vec<&(dyn ToSql + Sync)> = vec![
-                &c.inscription_id,
-                &c.listing_id,
-                &c.canceller,
-                nonce_str_ref,
-                &c.signature,
-                block_height_str_ref,
-                block_timestamp_str_ref,
-            ];
-            params.extend_from_slice(&values);
+            all_values.push(c.inscription_id.clone());
+            all_values.push(c.listing_id.clone());
+            all_values.push(c.canceller.clone());
+            all_values.push(nonce_str.clone());
+            all_values.push(c.signature.clone());
+            all_values.push(block_height_str.clone());
+            all_values.push(block_timestamp_str.clone());
         }
+        let params: Vec<&(dyn ToSql + Sync)> = all_values.iter().map(|s| s as &(dyn ToSql + Sync)).collect();
         client
             .query(
                 &format!(

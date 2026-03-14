@@ -9,6 +9,7 @@ use crate::db::cache::utils::{is_dune_mintable, move_dune_balance_to_output, new
 use doginals_parser::{Etching, Dune, Edict};
 use bitcoin::ScriptBuf;
 use doginals_parser::DuneId;
+use std::str::FromStr;
 
 
 /// Holds cached data relevant to a single transaction during indexing.
@@ -130,11 +131,11 @@ impl TransactionCache {
                 InputDuneBalance {
                     dune_id: dune_id.clone(),
                     balance: premine,
-                    txid: bitcoin::Txid::from_str(self.location.tx_id.as_str()).unwrap(),
+                    txid: bitcoin::Txid::from_str(&self.location.tx_id).expect("invalid txid"),
                     vout: 0,
                     address: None,
-                    block_height: self.location.block_height as u32,
-                    timestamp: self.location.timestamp,
+                        block_height: self.location.block_height as u32,
+                    timestamp: self.location.timestamp as u64,
                 },
             );
         }
@@ -201,11 +202,11 @@ impl TransactionCache {
             InputDuneBalance {
                 dune_id: dune_id.clone(),
                 balance: terms_amount.0,
-                txid: self.location.tx_id.clone(),
+                txid: bitcoin::Txid::from_str(&self.location.tx_id).expect("invalid txid"),
                 vout: 0,
                 address: None,
-                block_height: self.location.block_height,
-                timestamp: self.location.timestamp,
+                block_height: self.location.block_height as u32,
+                timestamp: self.location.timestamp as u64,
             },
         );
         Some(new_sequential_ledger_entry(
@@ -238,9 +239,9 @@ impl TransactionCache {
         let terms_amount = db_dune.terms_amount.unwrap();
         try_debug!(
             ctx,
-            "CENOTAPH MINT {spaced_name} {amount} {location}",
+            "CENOTAPH MINT {spaced_name} {balance} {location}",
             spaced_name = &db_dune.spaced_name,
-            amount = terms_amount.0,
+            balance = terms_amount.0,
             location = self.location.to_string()
         );
         // This entry does not go in the input dunes, it gets burned immediately.

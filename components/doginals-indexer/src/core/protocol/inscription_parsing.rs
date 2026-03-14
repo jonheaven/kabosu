@@ -1,3 +1,4 @@
+use doge_lotto::{LottoDeploy, LottoMint, try_parse_lotto_deploy, try_parse_lotto_mint};
 use std::{collections::HashMap, str, str::FromStr};
 
 use bitcoin::{
@@ -28,12 +29,7 @@ use crate::core::meta_protocols::drc20::{
     parser::{parse_drc20_operation, ParsedDrc20Operation},
 };
 
-use doge_lotto::{
-    LottoDeploy, LottoMint, LottoTemplate, ResolutionMode, LottoDraw, NumberConfig,
-    validate_mint_against_deploy, derive_draw_for_deploy, try_parse_lotto_deploy, try_parse_lotto_mint,
-    classic_prize_bps, compute_ticket_fingerprint, count_classic_matches, derive_classic_drawn_numbers,
-    derive_classic_numbers, score_ticket, u256_abs_diff, FINGERPRINT_TIER_BPS,
-};
+// ...existing code...
 /// A DMP operation parsed from an inscription body, bundled with context.
 #[derive(Debug, Clone)]
 pub struct ParsedDmpOp {
