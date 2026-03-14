@@ -70,10 +70,10 @@ impl TransactionCache {
             for balance in unallocated {
                 results.push(new_sequential_ledger_entry(
                     &self.location,
-                    Some(balance.amount),
+                    Some(balance.balance),
                     *dune_id,
                     None,
-                    balance.address.as_ref(),
+                    balance.address.as_deref(),
                     None,
                     DbLedgerOperation::Burn,
                     &mut self.next_event_index,
@@ -128,8 +128,13 @@ impl TransactionCache {
             self.add_input_dunes(
                 &dune_id,
                 InputDuneBalance {
+                    dune_id: dune_id.clone(),
+                    balance: premine,
+                    txid: self.location.tx_id.clone(),
+                    vout: 0,
                     address: None,
-                    amount: premine,
+                    block_height: self.location.block_height,
+                    timestamp: self.location.timestamp,
                 },
             );
         }
@@ -194,8 +199,13 @@ impl TransactionCache {
         self.add_input_dunes(
             dune_id,
             InputDuneBalance {
+                dune_id: dune_id.clone(),
+                balance: terms_amount.0,
+                txid: self.location.tx_id.clone(),
+                vout: 0,
                 address: None,
-                amount: terms_amount.0,
+                block_height: self.location.block_height,
+                timestamp: self.location.timestamp,
             },
         );
         Some(new_sequential_ledger_entry(
@@ -274,7 +284,7 @@ impl TransactionCache {
         // Calculate the maximum unallocated balance we can move.
         let unallocated = available_inputs
             .iter()
-            .map(|b| b.amount)
+            .map(|b| b.balance)
             .reduce(|acc, e| acc + e)
             .unwrap_or(0);
         // Perform movements.
@@ -404,7 +414,7 @@ mod test {
     use std::collections::VecDeque;
     use bitcoin::ScriptBuf;
     use dogecoin::utils::Context;
-    use doginals_parser::{Dune, Edict, Etching, Cenotaph, Terms};
+    use doginals_parser::{Dune, Edict, Etching, Terms};
     use maplit::hashmap;
 
     use super::TransactionCache;
@@ -562,8 +572,13 @@ mod test {
         let receiver_address =
             "bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string();
         balances.push_back(InputDuneBalance {
+            dune_id: dune_id.clone(),
+            balance: 1000,
+            txid: location.tx_id.clone(),
+            vout: 0,
             address: Some(sender_address.clone()),
-            amount: 1000,
+            block_height: location.block_height,
+            timestamp: location.timestamp,
         });
         let input_dunes = hashmap! {
             dune_id.clone() => balances

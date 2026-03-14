@@ -1,23 +1,22 @@
+use crate::db::cache::transaction_location::TransactionLocation;
 use std::collections::{HashMap, VecDeque};
 
 use bitcoin::{Address, ScriptBuf};
-use dogecoin::{try_debug, try_warn, types::dogecoin::TxIn, utils::Context};
+use dogecoin::{try_debug, try_warn, utils::Context};
 use doginals_parser::DuneId;
 use lru::LruCache;
-use tokio_postgres::Transaction;
 
 use super::input_dune_balance::InputDuneBalance;
+use crate::db::models::db_ledger_operation::DbLedgerOperation;
+use crate::db::models::db_ledger_entry::DbLedgerEntry;
+use crate::db::models::db_dune::DbDune;
+// ...existing code...
+// ...existing code...
+// ...existing code...
 #[cfg(test)]
-use bitcoin::hashes::hex::FromHex;
-#[cfg(test)]
-use bitcoin::{Txid, OutPoint, Sequence, Witness};
-use super::transaction_location::TransactionLocation;
-use crate::db::{
-    models::{
-        db_ledger_entry::DbLedgerEntry, db_ledger_operation::DbLedgerOperation, db_dune::DbDune,
-    },
-    pg_get_input_dune_balances,
-};
+// Remove unused imports; move to test modules
+// ...existing code...
+// ...existing code...
 
 /// Takes all transaction inputs and transforms them into dune balances to be allocated for operations. Looks inside an output LRU
 /// cache and the DB when there are cache misses.
@@ -42,9 +41,9 @@ pub async fn input_dune_balances_from_tx_inputs(
 
     // Look in both current block output cache and in long term LRU cache.
     for (i, input) in inputs.iter().enumerate() {
-        let tx_id = input.previous_output.txid.hash[2..].to_string();
+        let tx_id = input.previous_output.txid.clone();
         let vout = input.previous_output.vout;
-        let k = (tx_id.clone(), vout);
+        let k = (tx_id.hash.clone(), vout);
         if let Some(map) = block_output_cache.get(&k) {
             indexed_input_dunes.insert(i as u32, map.clone());
         } else if let Some(map) = output_cache.get(&k) {
@@ -193,18 +192,23 @@ pub fn move_dune_balance_to_output(
     loop {
         let Some(input_bal) = input_balances.pop_front() else { break; };
         let balance_taken = if amount == 0 {
-            input_bal.amount
+            input_bal.balance
         } else {
-            input_bal.amount.min(amount - total_sent)
+            input_bal.balance.min(amount - total_sent)
         };
         total_sent += balance_taken;
         if let Some(sender_address) = input_bal.address.clone() {
             senders.push((balance_taken, sender_address));
         }
-        if balance_taken < input_bal.amount {
+        if balance_taken < input_bal.balance {
             input_balances.push_front(InputDuneBalance {
+                dune_id: input_bal.dune_id.clone(),
+                balance: input_bal.balance - balance_taken,
+                txid: input_bal.txid.clone(),
+                vout: input_bal.vout,
                 address: input_bal.address.clone(),
-                amount: input_bal.amount - balance_taken,
+                block_height: input_bal.block_height,
+                timestamp: input_bal.timestamp,
             });
             break;
         }
@@ -305,6 +309,7 @@ mod test {
         use crate::db::cache::transaction_location::TransactionLocation;
         use crate::db::cache::utils::move_dune_balance_to_output;
         use crate::db::models::db_ledger_operation::DbLedgerOperation;
+        use bitcoin::Txid;
 
         fn dummy_eligible_output() -> HashMap<u32, ScriptBuf> {
             hashmap! {
@@ -320,9 +325,25 @@ mod test {
             let address =
                 Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: address.clone(), amount: 1000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: address.clone(),
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
-            let mut input2 = InputDuneBalance { address: None, amount: 1000 };
+            let mut input2 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input2);
             let eligible_outputs = dummy_eligible_output();
             let mut next_event_index = 0;
@@ -356,7 +377,15 @@ mod test {
             let address =
                 Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: address.clone(), amount: 1000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: address.clone(),
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
 
             let results = move_dune_balance_to_output(
@@ -381,7 +410,15 @@ mod test {
         #[test]
         fn moves_partial_input_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: None, amount: 5000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 5000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
@@ -405,13 +442,21 @@ mod test {
             assert_eq!(entry2.amount.unwrap().0, 1000);
             // Remainder is still in available inputs.
             let remaining = available_inputs.get(0).unwrap();
-            assert_eq!(remaining.amount, 4000);
+            assert_eq!(remaining.balance, 4000);
         }
 
         #[test]
         fn moves_insufficient_input_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
@@ -439,11 +484,35 @@ mod test {
         #[test]
         fn moves_all_remaining_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: None, amount: 6000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 6000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
-            let mut input2 = InputDuneBalance { address: None, amount: 2000 };
+            let mut input2 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 2000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input2);
-            let mut input3 = InputDuneBalance { address: None, amount: 2000 };
+            let mut input3 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 2000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input3);
             let eligible_outputs = dummy_eligible_output();
 
@@ -477,7 +546,15 @@ mod test {
         #[test]
         fn move_to_output_with_address_failure_is_burned() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
             let mut eligible_outputs = HashMap::new();
             // Broken script buf that yields no address.
@@ -504,7 +581,15 @@ mod test {
         #[test]
         fn move_to_nonexistent_output_is_burned() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
@@ -529,7 +614,15 @@ mod test {
         #[test]
         fn send_not_generated_on_minted_balance() {
             let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance { address: None, amount: 1000 };
+            let mut input1 = InputDuneBalance {
+                dune_id: DuneId::new(840000, 25).unwrap(),
+                balance: 1000,
+                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                vout: 0,
+                address: None,
+                block_height: 0,
+                timestamp: 0,
+            };
             available_inputs.push_back(input1);
             let eligible_outputs = dummy_eligible_output();
 
@@ -652,19 +745,21 @@ mod test {
     mod input_balances {
         use std::num::NonZeroUsize;
 
-        use bitcoin::{OutPoint, TxIn, Txid, ScriptBuf, Sequence, Witness};
+        use bitcoin::{OutPoint, TxIn, ScriptBuf, Sequence, Witness};
         use dogecoin::utils::Context;
         use doginals_parser::DuneId;
         use lru::LruCache;
         use maplit::hashmap;
 
         use crate::db::cache::input_dune_balance::InputDuneBalance;
+        // Removed unused import for TransactionLocation
         use crate::db::cache::utils::input_dune_balances_from_tx_inputs;
         use crate::db::models::db_ledger_entry::DbLedgerEntry;
         use crate::db::models::db_ledger_operation::DbLedgerOperation;
         use crate::db::pg_insert_ledger_entries;
         use crate::db::pg_test_client;
         use crate::db::pg_test_roll_back_migrations;
+        use bitcoin::Txid;
 
         #[tokio::test]
         async fn from_block_cache() {
@@ -681,7 +776,15 @@ mod test {
             let block_output_cache = hashmap! {
                 ("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
                             .to_string(), 1) => hashmap! {
-                                dune_id => vec![InputDuneBalance { address: None, amount: 2000 }]
+                                dune_id => vec![InputDuneBalance {
+                                    dune_id: dune_id,
+                                    balance: 2000,
+                                    txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                                    vout: 1,
+                                    address: None,
+                                    block_height: 0,
+                                    timestamp: 0,
+                                }]
                             }
             };
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
@@ -705,7 +808,7 @@ mod test {
             assert_eq!(dune_results.len(), 1);
             let input_bal = dune_results.get(0).unwrap();
             assert_eq!(input_bal.address, Option::<String>::None);
-            assert_eq!(input_bal.amount, 2000);
+            assert_eq!(input_bal.balance, 2000);
         }
 
         #[tokio::test]
@@ -728,7 +831,7 @@ mod test {
                     1,
                 ),
                 hashmap! {
-                    dune_id => vec![InputDuneBalance { address: None, amount: 2000 }]
+                    dune_id => vec![InputDuneBalance { address: None, balance: 2000, dune_id, txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(), vout: 1, block_height: 0, timestamp: 0 }]
                 },
             );
             let ctx = Context::empty();
@@ -751,7 +854,7 @@ mod test {
             assert_eq!(dune_results.len(), 1);
             let input_bal = dune_results.get(0).unwrap();
             assert_eq!(input_bal.address, Option::<String>::None);
-            assert_eq!(input_bal.amount, 2000);
+            assert_eq!(input_bal.balance, 2000);
         }
 
         #[tokio::test]
@@ -805,7 +908,7 @@ mod test {
             assert_eq!(dune_results.len(), 1);
             let input_bal = dune_results.get(0).unwrap();
             assert_eq!(input_bal.address, Option::<String>::None);
-            assert_eq!(input_bal.amount, 2000);
+            assert_eq!(input_bal.balance, 2000);
         }
 
         #[tokio::test]
@@ -856,7 +959,7 @@ mod test {
             let mut block_output_cache = hashmap! {
                 ("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b"
                             .to_string(), 1) => hashmap! {
-                                dune_id => vec![InputDuneBalance { address: None, amount: 2000 }]
+                                dune_id => vec![InputDuneBalance { address: None, balance: 2000, dune_id, txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(), vout: 1, block_height: 0, timestamp: 0 }]
                             }
             };
             let mut output_cache = LruCache::new(NonZeroUsize::new(1).unwrap());
@@ -874,7 +977,7 @@ mod test {
             assert_eq!(balances.len(), 1);
             let balance = balances.get(0).unwrap();
             assert_eq!(balance.address, Option::<String>::None);
-            assert_eq!(balance.amount, 2000);
+            assert_eq!(balance.balance, 2000);
             assert_eq!(block_output_cache.len(), 0);
         }
     }

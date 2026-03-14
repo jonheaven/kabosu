@@ -1,6 +1,7 @@
 use std::{collections::HashMap, process, str::FromStr};
 
 use crate::db::cache::input_dune_balance::InputDuneBalance;
+use bitcoin::Txid;
 use config::Config;
 use deadpool_postgres::GenericClient;
 use dogecoin::{try_error, try_info, types::BlockIdentifier, utils::Context};
@@ -469,9 +470,16 @@ pub async fn pg_get_input_dune_balances(
         let dune_id = DuneId::from_str(dune_str.as_str()).unwrap();
         let address: Option<String> = row.get("address");
         let amount: PgNumericU128 = row.get("amount");
+        let tx_id_str: String = row.get("tx_id");
+        let vout: u32 = row.get("output");
         let input_bal = InputDuneBalance {
+            dune_id: dune_id.clone(),
+            balance: amount.0,
+            txid: Txid::from_str(tx_id_str.as_str()).unwrap(),
+            vout,
             address,
-            amount: amount.0,
+            block_height: 0,
+            timestamp: 0,
         };
         if let Some(input) = results.get_mut(&key.0) {
             if let Some(dune_bal) = input.get_mut(&dune_id) {
