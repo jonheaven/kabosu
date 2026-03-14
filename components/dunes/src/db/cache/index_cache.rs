@@ -1,3 +1,4 @@
+use dogecoin::utils::dogecoind::dogecoin_get_client;
 use std::{collections::HashMap, num::NonZeroUsize, str::FromStr};
 
 use bitcoin::{Network, ScriptBuf};
@@ -9,7 +10,7 @@ use dogecoin::{
     types::dogecoin::TxIn,
     utils::Context,
 };
-use dogecoin::utils::dogecoind::dogecoin_get_client;
+// ...existing code...
 use doginals_parser::{Cenotaph, Dune, DuneId, Dunestone, Edict, Etching, Height};
 use lru::LruCache;
 use postgres::pg_pool_client;
@@ -608,11 +609,11 @@ mod tests {
                 0,
             ),
             db_cache: DbCache::new(),
-            dogecoin_client: dogecoind::utils::dogecoind::dogecoin_get_client(
-                &Config::test_default().dogecoind,
+            dogecoin_client: dogecoin::utils::dogecoind::dogecoin_get_client(
+                &Config::test_default().dogecoin,
                 &ctx,
             ),
-            dogecoin_client_config: Config::test_default().dogecoind,
+            dogecoin_client_config: Config::test_default().dogecoin,
             minimum_dune: Dune::minimum_at_height(network, Height(840_000)),
         };
 

@@ -1,4 +1,4 @@
-use dogecoin::types::dogecoin::TxIn;
+// ...existing code...
 use tokio_postgres::Transaction;
 use bitcoin::{ScriptBuf, Address};
 use crate::db::cache::transaction_location::TransactionLocation;
@@ -11,7 +11,6 @@ use crate::db::models::db_ledger_operation::DbLedgerOperation;
 use crate::db::models::db_ledger_entry::DbLedgerEntry;
 use crate::db::models::db_dune::DbDune;
 use crate::db::pg_get_input_dune_balances;
-
 // ...existing code...
 // ...existing code...
 // ...existing code...
@@ -30,7 +29,7 @@ use crate::db::pg_get_input_dune_balances;
 /// * `db_tx` - DB transaction
 /// * `ctx` - Context
 pub async fn input_dune_balances_from_tx_inputs(
-    inputs: &[TxIn],
+    inputs: &[dogecoin::types::dogecoin::TxIn],
     block_output_cache: &HashMap<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
     output_cache: &mut LruCache<(String, u32), HashMap<DuneId, Vec<InputDuneBalance>>>,
     db_tx: &mut Transaction<'_>,
@@ -321,55 +320,58 @@ mod test {
             }
         }
 
+        use std::str::FromStr;
         #[test]
         fn ledger_writes_receive_before_send() {
-            let address =
-                Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
-            let mut available_inputs = VecDeque::new();
-            let mut input1 = InputDuneBalance {
-                dune_id: DuneId::new(840000, 25).unwrap(),
-                balance: 1000,
-                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
-                vout: 0,
-                address: address.clone(),
-                block_height: 0,
-                timestamp: 0,
-            };
-            available_inputs.push_back(input1);
-            let mut input2 = InputDuneBalance {
-                dune_id: DuneId::new(840000, 25).unwrap(),
-                balance: 1000,
-                txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
-                vout: 0,
-                address: None,
-                block_height: 0,
-                timestamp: 0,
-            };
-            available_inputs.push_back(input2);
-            let eligible_outputs = dummy_eligible_output();
-            let mut next_event_index = 0;
-
-            let results = move_dune_balance_to_output(
-                &TransactionLocation::dummy(),
-                Some(0),
-                &DuneId::new(840000, 25).unwrap(),
-                &mut available_inputs,
-                &eligible_outputs,
-                0,
-                &mut next_event_index,
-                &Context::empty(),
-            );
-
-            let receive = results.get(0).unwrap();
-            assert_eq!(receive.event_index.0, 0u32);
-            assert_eq!(receive.operation, DbLedgerOperation::Receive);
-            assert_eq!(receive.amount.unwrap().0, 2000u128);
+            use bitcoin::Txid;
             // ...existing code...
-            let send = results.get(1).unwrap();
-            assert_eq!(send.event_index.0, 1u32);
-            assert_eq!(send.operation, DbLedgerOperation::Send);
-            assert_eq!(send.amount.unwrap().0, 1000u128);
-            assert_eq!(results.len(), 2);
+                let address = Some("bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string());
+                let mut available_inputs = VecDeque::new();
+                let mut input1 = InputDuneBalance {
+                    dune_id: DuneId::new(840000, 25).unwrap(),
+                    balance: 1000,
+                    txid: Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_slice(&[0u8; 32]).unwrap()),
+                    vout: 0,
+                    address: address.clone(),
+                    block_height: 0,
+                    timestamp: 0,
+                };
+                available_inputs.push_back(input1);
+                let mut input2 = InputDuneBalance {
+                    dune_id: DuneId::new(840000, 25).unwrap(),
+                    balance: 1000,
+                    txid: Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::from_slice(&[0u8; 32]).unwrap()),
+                    vout: 0,
+                    address: None,
+                    block_height: 0,
+                    timestamp: 0,
+                };
+                available_inputs.push_back(input2);
+                let eligible_outputs = dummy_eligible_output();
+                let mut next_event_index = 0;
+
+                let results = move_dune_balance_to_output(
+                    &TransactionLocation::dummy(),
+                    Some(0),
+                    &DuneId::new(840000, 25).unwrap(),
+                    &mut available_inputs,
+                    &eligible_outputs,
+                    0,
+                    &mut next_event_index,
+                    &Context::empty(),
+                );
+
+                let receive = results.get(0).unwrap();
+                assert_eq!(receive.event_index.0, 0u32);
+                assert_eq!(receive.operation, DbLedgerOperation::Receive);
+                assert_eq!(receive.amount.unwrap().0, 2000u128);
+                // ...existing code...
+                let send = results.get(1).unwrap();
+                assert_eq!(send.event_index.0, 1u32);
+                assert_eq!(send.operation, DbLedgerOperation::Send);
+                assert_eq!(send.amount.unwrap().0, 1000u128);
+                assert_eq!(results.len(), 2);
+                assert_eq!(available_inputs.len(), 0);
             assert_eq!(available_inputs.len(), 0);
         }
 
@@ -746,7 +748,7 @@ mod test {
     mod input_balances {
         use std::num::NonZeroUsize;
 
-        use bitcoin::{OutPoint, TxIn, ScriptBuf, Sequence, Witness};
+        use bitcoin::{OutPoint, TxIn, ScriptBuf, Sequence, Witness, Txid};
         use dogecoin::utils::Context;
         use doginals_parser::DuneId;
         use lru::LruCache;
@@ -760,13 +762,12 @@ mod test {
         use crate::db::pg_insert_ledger_entries;
         use crate::db::pg_test_client;
         use crate::db::pg_test_roll_back_migrations;
-        use bitcoin::Txid;
 
         #[tokio::test]
         async fn from_block_cache() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                    txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
                 },
                 script_sig: ScriptBuf::new(),
@@ -816,7 +817,7 @@ mod test {
         async fn from_lru_cache() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                    txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
                 },
                 script_sig: ScriptBuf::new(),
@@ -862,7 +863,7 @@ mod test {
         async fn from_db() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                    txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
                 },
                 script_sig: ScriptBuf::new(),
@@ -916,7 +917,7 @@ mod test {
         async fn inputs_without_balances() {
             let inputs = vec![TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_hex("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
+                    txid: Txid::from_str("045fe33f1174d6a72084e751735a89746a259c6d3e418b65c03ec0740f924c7b").unwrap(),
                     vout: 1,
                 },
                 script_sig: ScriptBuf::new(),

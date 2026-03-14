@@ -24,6 +24,13 @@ pub async fn dune_etching_has_valid_commit(
 
 #[cfg(test)]
 mod tests {
+        // Stub for extracting tapscript from witness for tests
+        fn unversioned_leaf_script_from_witness(witness: &bitcoin::Witness) -> Option<bitcoin::ScriptBuf> {
+            if witness.len() < 2 {
+                return None;
+            }
+            bitcoin::ScriptBuf::from_bytes(witness[1].to_vec()).into()
+        }
     use std::str::FromStr;
 
     use bitcoin::{
@@ -32,7 +39,7 @@ mod tests {
     };
     use config::{Config, DogecoinConfig, DogecoinDataSource};
     use dogecoin::utils::{dogecoind::dogecoin_get_client, Context};
-    use doginals_parser::{Dune, SpacedDune};
+    use doginals_parser::{Dune, SpacedDune, Dunestone};
 
     use super::*;
 

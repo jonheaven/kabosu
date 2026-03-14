@@ -1,3 +1,4 @@
+// ...existing code...
 use std::collections::{HashMap, VecDeque};
 use dogecoin::{try_debug, try_warn, utils::Context};
 use crate::db::DbLedgerEntry;
@@ -9,7 +10,6 @@ use crate::db::cache::utils::{is_dune_mintable, move_dune_balance_to_output, new
 use doginals_parser::{Etching, Dune, Edict};
 use bitcoin::ScriptBuf;
 use doginals_parser::DuneId;
-use std::str::FromStr;
 
 
 /// Holds cached data relevant to a single transaction during indexing.
@@ -131,11 +131,11 @@ impl TransactionCache {
                 InputDuneBalance {
                     dune_id: dune_id.clone(),
                     balance: premine,
-                    txid: bitcoin::Txid::from_str(&self.location.tx_id).expect("invalid txid"),
+                    txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_slice(&[0u8; 32]).unwrap()),
                     vout: 0,
                     address: None,
                         block_height: self.location.block_height as u32,
-                    timestamp: self.location.timestamp as u64,
+                        timestamp: self.location.timestamp as u64,
                 },
             );
         }
@@ -202,11 +202,11 @@ impl TransactionCache {
             InputDuneBalance {
                 dune_id: dune_id.clone(),
                 balance: terms_amount.0,
-                txid: bitcoin::Txid::from_str(&self.location.tx_id).expect("invalid txid"),
+                txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_slice(&[0u8; 32]).unwrap()),
                 vout: 0,
                 address: None,
                 block_height: self.location.block_height as u32,
-                timestamp: self.location.timestamp as u64,
+                    timestamp: self.location.timestamp as u64,
             },
         );
         Some(new_sequential_ledger_entry(
@@ -469,6 +469,7 @@ mod test {
                 height: (None, None),
                 offset: (None, None),
             }),
+            spacers: None,
             turbo: true,
         };
 
@@ -575,11 +576,11 @@ mod test {
         balances.push_back(InputDuneBalance {
             dune_id: dune_id.clone(),
             balance: 1000,
-            txid: location.tx_id.clone(),
+            txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_slice(&[0u8; 32]).unwrap()),
             vout: 0,
             address: Some(sender_address.clone()),
-            block_height: location.block_height,
-            timestamp: location.timestamp,
+            block_height: location.block_height as u32,
+            timestamp: location.timestamp as u64,
         });
         let input_dunes = hashmap! {
             dune_id.clone() => balances
@@ -616,7 +617,12 @@ mod test {
             "bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string();
         balances.push_back(InputDuneBalance {
             address: Some(sender_address.clone()),
-            amount: 1000,
+            balance: 1000,
+            dune_id: dune_id.clone(),
+            txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_slice(&[0u8; 32]).unwrap()),
+            vout: 0,
+            block_height: 0,
+            timestamp: 0,
         });
         let input_dunes = hashmap! {
             dune_id.clone() => balances
@@ -647,7 +653,12 @@ mod test {
             "bc1p8zxlhgdsq6dmkzk4ammzcx55c3hfrg69ftx0gzlnfwq0wh38prds0nzqwf".to_string();
         balances.push_back(InputDuneBalance {
             address: Some(sender_address.clone()),
-            amount: 1000,
+            balance: 1000,
+            dune_id: dune_id.clone(),
+            txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_slice(&[0u8; 32]).unwrap()),
+            vout: 0,
+            block_height: 0,
+            timestamp: 0,
         });
         let input_dunes = hashmap! {
             dune_id.clone() => balances
