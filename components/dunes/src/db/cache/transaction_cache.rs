@@ -73,7 +73,7 @@ impl TransactionCache {
                     Some(balance.balance),
                     *dune_id,
                     None,
-                    balance.address.as_deref(),
+                    balance.address.as_ref(),
                     None,
                     DbLedgerOperation::Burn,
                     &mut self.next_event_index,
@@ -130,10 +130,10 @@ impl TransactionCache {
                 InputDuneBalance {
                     dune_id: dune_id.clone(),
                     balance: premine,
-                    txid: self.location.tx_id.clone(),
+                    txid: bitcoin::Txid::from_str(self.location.tx_id.as_str()).unwrap(),
                     vout: 0,
                     address: None,
-                    block_height: self.location.block_height,
+                    block_height: self.location.block_height as u32,
                     timestamp: self.location.timestamp,
                 },
             );

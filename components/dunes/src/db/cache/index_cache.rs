@@ -7,8 +7,9 @@ use dogecoin::{
     bitcoincore_rpc::Client as BitcoinRpcClient,
     try_debug, try_error, try_warn,
     types::dogecoin::TxIn,
-    utils::{dogecoind::dogecoin_get_client, Context},
+    utils::Context,
 };
+use dogecoin::utils::dogecoind::dogecoin_get_client;
 use doginals_parser::{Cenotaph, Dune, DuneId, Dunestone, Edict, Etching, Height};
 use lru::LruCache;
 use postgres::pg_pool_client;
@@ -544,12 +545,12 @@ impl IndexCache {
                         let k = (entry.tx_id.clone(), entry.output.unwrap().0);
                         let dune_id = DuneId::from_str(entry.dune_id.as_str()).unwrap();
                         let balance = InputDuneBalance {
-                            dune_id: entry.dune_id.clone(),
-                            balance: entry.amount.unwrap().0 as u64,
-                            txid: entry.tx_id.clone(),
+                            dune_id,
+                            balance: entry.amount.unwrap().0 as u128,
+                            txid: bitcoin::Txid::from_str(entry.tx_id.as_str()).unwrap(),
                             vout: entry.output.unwrap().0,
-                            address: entry.address.clone().unwrap_or_default(),
-                            block_height: entry.block_height.0 as u64,
+                            address: Some(entry.address.clone().unwrap_or_default()),
+                            block_height: entry.block_height.0 as u32,
                             timestamp: entry.timestamp.0 as u64,
                         };
                         let mut default = HashMap::new();
